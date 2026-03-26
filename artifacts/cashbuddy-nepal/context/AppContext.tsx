@@ -232,20 +232,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const loadAllData = async () => {
     try {
-      const [txRaw, budgetRaw, goalRaw, profileRaw, chatRaw] =
-        await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.TRANSACTIONS),
-          AsyncStorage.getItem(STORAGE_KEYS.BUDGETS),
-          AsyncStorage.getItem(STORAGE_KEYS.GOALS),
-          AsyncStorage.getItem(STORAGE_KEYS.PROFILE),
-          AsyncStorage.getItem(STORAGE_KEYS.CHAT_HISTORY),
+      const profileRaw = await AsyncStorage.getItem(STORAGE_KEYS.PROFILE);
+      const savedProfile = profileRaw ? JSON.parse(profileRaw) : null;
+
+      // If not yet onboarded (new onboarding system), wipe ALL old data
+      // This removes any legacy demo/seeded data from previous sessions
+      if (!savedProfile || !savedProfile.isOnboarded) {
+        await AsyncStorage.multiRemove([
+          STORAGE_KEYS.TRANSACTIONS,
+          STORAGE_KEYS.BUDGETS,
+          STORAGE_KEYS.GOALS,
+          STORAGE_KEYS.CHAT_HISTORY,
+          STORAGE_KEYS.PROFILE,
         ]);
+        setTransactions([]);
+        setBudgets([]);
+        setGoals([]);
+        setChatHistory([]);
+        setProfile(defaultProfile);
+        setIsLoading(false);
+        return;
+      }
+
+      // User has completed onboarding — load their real data
+      const [txRaw, budgetRaw, goalRaw, chatRaw] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.TRANSACTIONS),
+        AsyncStorage.getItem(STORAGE_KEYS.BUDGETS),
+        AsyncStorage.getItem(STORAGE_KEYS.GOALS),
+        AsyncStorage.getItem(STORAGE_KEYS.CHAT_HISTORY),
+      ]);
 
       if (txRaw) setTransactions(JSON.parse(txRaw));
       if (budgetRaw) setBudgets(JSON.parse(budgetRaw));
       if (goalRaw) setGoals(JSON.parse(goalRaw));
-      if (profileRaw) setProfile({ ...defaultProfile, ...JSON.parse(profileRaw) });
       if (chatRaw) setChatHistory(JSON.parse(chatRaw));
+      setProfile({ ...defaultProfile, ...savedProfile });
     } catch (e) {
     } finally {
       setIsLoading(false);

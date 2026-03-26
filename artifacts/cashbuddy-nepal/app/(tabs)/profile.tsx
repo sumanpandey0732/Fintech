@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React from "react";
+import React, { useRef } from "react";
 import {
   Alert,
   Platform,
@@ -44,14 +44,17 @@ export default function ProfileScreen() {
   const handleClearData = () => {
     Alert.alert(
       "Clear All Data",
-      "This will permanently delete all your transactions, budgets and goals. Are you sure?",
+      "This will permanently delete all your transactions, budgets, goals and reset the app. You will go through setup again. Are you sure?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Clear",
+          text: "Reset App",
           style: "destructive",
-          onPress: () => {
+          onPress: async () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            await updateProfile({ isOnboarded: false, name: "", startingBalance: 0 });
+            // Force reload via full state reset
+            router.replace("/");
           },
         },
       ]

@@ -226,8 +226,12 @@ export default function ProfileScreen() {
 
         {/* App Info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appInfoText}>CashBuddy Nepal Pro v1.0</Text>
-          <Text style={styles.appInfoSub}>Made with love in Nepal</Text>
+          <View style={styles.appInfoCard}>
+            <Text style={styles.appInfoText}>CashBuddy Nepal Pro v1.0</Text>
+            <Text style={styles.appInfoSub}>Made with love in Nepal 🇳🇵</Text>
+            <View style={styles.divider} />
+            <Text style={styles.builtBy}>Built by Santosh Pandey</Text>
+          </View>
         </View>
       </ScrollView>
     </GradientBackground>
@@ -500,16 +504,37 @@ const styles = StyleSheet.create({
   appInfo: {
     alignItems: "center",
     paddingVertical: 24,
-    gap: 4,
+    paddingHorizontal: 20,
+  },
+  appInfoCard: {
+    backgroundColor: COLORS.darkCard,
+    borderRadius: 20,
+    padding: 20,
+    alignItems: "center",
+    gap: 6,
+    width: "100%",
+    borderWidth: 1,
+    borderColor: COLORS.darkBorder,
   },
   appInfoText: {
+    color: COLORS.darkText,
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  appInfoSub: {
     color: COLORS.darkTextSecondary,
     fontSize: 13,
     fontFamily: "Inter_400Regular",
   },
-  appInfoSub: {
-    color: COLORS.darkTextSecondary + "88",
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
+  divider: {
+    width: "100%",
+    height: 1,
+    backgroundColor: COLORS.darkBorder,
+    marginVertical: 8,
+  },
+  builtBy: {
+    color: COLORS.primaryLight,
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
 });

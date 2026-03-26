@@ -4,6 +4,29 @@
 
 pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
 
+## CashBuddy Nepal Pro (Mobile App)
+
+**Location**: `artifacts/cashbuddy-nepal/`
+**Type**: Expo React Native mobile app
+
+### Key Features
+- **Onboarding**: First-launch flow asks for name + starting balance (no dummy data)
+- **Balance tracking**: Starting balance stored in profile + transaction net = total balance
+- **Transactions**: Add income/expense with category, note, recurring option
+- **Analytics**: Bar chart (6-month overview) + SVG pie chart (category breakdown)
+- **Budgets**: Monthly category limits with progress bars
+- **Goals**: Saving goals with progress and add-funds
+- **AI Advisor**: Rule-based AI financial advisor (Nepal-specific)
+- **Gamification**: XP, levels, achievements, streaks
+- **Credits**: "Built by Santosh Pandey" in Settings/Profile
+
+### Architecture
+- Storage: AsyncStorage only (no backend/Firebase)
+- Currency: Nepali Rupees (Rs./NPR)
+- Theme: Dark blue gradient (#060D1F → #0D1B4B) + glassmorphism
+- Context: `AppProvider` wraps entire app, handles all state
+- Routing: Expo Router v6 with onboarding guard (`app/index.tsx` redirects based on `profile.isOnboarded`)
+
 ## Stack
 
 - **Monorepo tool**: pnpm workspaces

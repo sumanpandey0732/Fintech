@@ -72,6 +72,8 @@ export interface UserProfile {
   achievements: string[];
   darkMode: boolean;
   currency: string;
+  startingBalance: number;
+  isOnboarded: boolean;
 }
 
 export interface ChatMessage {
@@ -168,6 +170,20 @@ export function getXpForNextLevel(level: number): number {
   return level * 500;
 }
 
+const defaultProfile: UserProfile = {
+  name: "",
+  avatar: "user",
+  level: 1,
+  xp: 0,
+  streak: 0,
+  lastActiveDate: "",
+  achievements: [],
+  darkMode: true,
+  currency: "Rs.",
+  startingBalance: 0,
+  isOnboarded: false,
+};
+
 interface AppContextType {
   transactions: Transaction[];
   budgets: Budget[];
@@ -189,6 +205,7 @@ interface AppContextType {
   addToGoal: (id: string, amount: number) => Promise<void>;
 
   updateProfile: (p: Partial<UserProfile>) => Promise<void>;
+  completeOnboarding: (name: string, startingBalance: number) => Promise<void>;
   addChatMessage: (m: Omit<ChatMessage, "id">) => void;
   clearChatHistory: () => void;
 
@@ -198,18 +215,6 @@ interface AppContextType {
   getCategorySpending: () => Record<string, number>;
   isLoading: boolean;
 }
-
-const defaultProfile: UserProfile = {
-  name: "Samir Shrestha",
-  avatar: "user",
-  level: 1,
-  xp: 0,
-  streak: 0,
-  lastActiveDate: "",
-  achievements: [],
-  darkMode: true,
-  currency: "Rs.",
-};
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -241,168 +246,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (goalRaw) setGoals(JSON.parse(goalRaw));
       if (profileRaw) setProfile({ ...defaultProfile, ...JSON.parse(profileRaw) });
       if (chatRaw) setChatHistory(JSON.parse(chatRaw));
-
-      if (!txRaw) {
-        await seedDemoData();
-      }
     } catch (e) {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const seedDemoData = async () => {
-    const now = new Date();
-    const demoTransactions: Transaction[] = [
-      {
-        id: "demo1",
-        type: "income",
-        amount: 45000,
-        category: "salary",
-        note: "Monthly salary",
-        date: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
-        tags: ["work"],
-        recurring: "monthly",
-      },
-      {
-        id: "demo2",
-        type: "expense",
-        amount: 2500,
-        category: "food",
-        note: "Grocery shopping",
-        date: new Date(now.getFullYear(), now.getMonth(), 3).toISOString(),
-        tags: ["grocery"],
-        recurring: "none",
-      },
-      {
-        id: "demo3",
-        type: "expense",
-        amount: 800,
-        category: "transport",
-        note: "Bus fare",
-        date: new Date(now.getFullYear(), now.getMonth(), 5).toISOString(),
-        tags: [],
-        recurring: "none",
-      },
-      {
-        id: "demo4",
-        type: "expense",
-        amount: 3200,
-        category: "shopping",
-        note: "Clothes from New Road",
-        date: new Date(now.getFullYear(), now.getMonth(), 8).toISOString(),
-        tags: ["clothing"],
-        recurring: "none",
-      },
-      {
-        id: "demo5",
-        type: "income",
-        amount: 12000,
-        category: "freelance",
-        note: "Web design project",
-        date: new Date(now.getFullYear(), now.getMonth(), 10).toISOString(),
-        tags: ["work", "design"],
-        recurring: "none",
-      },
-      {
-        id: "demo6",
-        type: "expense",
-        amount: 1500,
-        category: "bills",
-        note: "Electricity bill",
-        date: new Date(now.getFullYear(), now.getMonth(), 12).toISOString(),
-        tags: ["utility"],
-        recurring: "monthly",
-      },
-      {
-        id: "demo7",
-        type: "expense",
-        amount: 600,
-        category: "entertainment",
-        note: "Cinema and snacks",
-        date: new Date(now.getFullYear(), now.getMonth(), 15).toISOString(),
-        tags: ["fun"],
-        recurring: "none",
-      },
-      {
-        id: "demo8",
-        type: "expense",
-        amount: 1200,
-        category: "health",
-        note: "Medical checkup",
-        date: new Date(now.getFullYear(), now.getMonth(), 18).toISOString(),
-        tags: ["medical"],
-        recurring: "none",
-      },
-      {
-        id: "demo9",
-        type: "expense",
-        amount: 900,
-        category: "food",
-        note: "Restaurant dinner",
-        date: new Date(now.getFullYear(), now.getMonth(), 20).toISOString(),
-        tags: ["dining"],
-        recurring: "none",
-      },
-      {
-        id: "demo10",
-        type: "expense",
-        amount: 5000,
-        category: "education",
-        note: "Online course",
-        date: new Date(now.getFullYear(), now.getMonth(), 22).toISOString(),
-        tags: ["learning"],
-        recurring: "none",
-      },
-    ];
-
-    const demoBudgets: Budget[] = [
-      { category: "food", limit: 8000, spent: 3400 },
-      { category: "transport", limit: 3000, spent: 800 },
-      { category: "shopping", limit: 5000, spent: 3200 },
-      { category: "entertainment", limit: 2000, spent: 600 },
-      { category: "bills", limit: 5000, spent: 1500 },
-    ];
-
-    const demoGoals: SavingGoal[] = [
-      {
-        id: "goal1",
-        title: "New Laptop",
-        targetAmount: 80000,
-        currentAmount: 25000,
-        deadline: new Date(now.getFullYear(), now.getMonth() + 4, 1).toISOString(),
-        icon: "monitor",
-        color: "#1565C0",
-      },
-      {
-        id: "goal2",
-        title: "Vacation to Pokhara",
-        targetAmount: 30000,
-        currentAmount: 12000,
-        deadline: new Date(now.getFullYear(), now.getMonth() + 2, 1).toISOString(),
-        icon: "map",
-        color: "#00C853",
-      },
-      {
-        id: "goal3",
-        title: "Emergency Fund",
-        targetAmount: 100000,
-        currentAmount: 45000,
-        deadline: new Date(now.getFullYear() + 1, 0, 1).toISOString(),
-        icon: "shield",
-        color: "#FF6D00",
-      },
-    ];
-
-    setTransactions(demoTransactions);
-    setBudgets(demoBudgets);
-    setGoals(demoGoals);
-
-    await Promise.all([
-      AsyncStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(demoTransactions)),
-      AsyncStorage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(demoBudgets)),
-      AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(demoGoals)),
-    ]);
   };
 
   const addXP = useCallback(async (amount: number) => {
@@ -440,6 +287,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     },
     [addXP]
   );
+
+  const completeOnboarding = useCallback(async (name: string, startingBalance: number) => {
+    const updated = { ...defaultProfile, name, startingBalance, isOnboarded: true };
+    setProfile(updated);
+    await AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
+  }, []);
 
   const addTransaction = useCallback(
     async (t: Omit<Transaction, "id">) => {
@@ -586,11 +439,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const getBalance = useCallback(() => {
-    return transactions.reduce(
+    const txBalance = transactions.reduce(
       (sum, t) => (t.type === "income" ? sum + t.amount : sum - t.amount),
       0
     );
-  }, [transactions]);
+    return profile.startingBalance + txBalance;
+  }, [transactions, profile.startingBalance]);
 
   const getMonthlyIncome = useCallback(() => {
     const now = new Date();
@@ -659,6 +513,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         deleteGoal,
         addToGoal,
         updateProfile,
+        completeOnboarding,
         addChatMessage,
         clearChatHistory,
         getBalance,

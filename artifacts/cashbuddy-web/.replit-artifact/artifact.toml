@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/cashbuddy-web/"
+title = "CashBuddy Nepal Pro"
+version = "1.0.0"
+id = "artifacts/cashbuddy-web"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/cashbuddy-web/" ]
+localPort = 25655
+
+[services.development]
+run = "pnpm --filter @workspace/cashbuddy-web run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/cashbuddy-web", "run", "build" ]
+publicDir = "artifacts/cashbuddy-web/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25655"
+BASE_PATH = "/cashbuddy-web/"

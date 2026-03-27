@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@nkzw/create-context-hook": "^1.1.0",
-    "expo-crypto": "15.0.8"
+    "expo-crypto": "15.0.8",
+    "expo-notifications": "~0.32.16"
   }
 }

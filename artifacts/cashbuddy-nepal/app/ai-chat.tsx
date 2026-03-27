@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -14,83 +15,99 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Animated, {
-  FadeIn,
-  FadeInDown,
-} from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import COLORS from "@/constants/colors";
 import { formatAmount } from "@/constants/categories";
 import { ChatMessage, useApp } from "@/context/AppContext";
 
-function generateAIResponse(
-  message: string,
+const API_KEY: string = (Constants.expoConfig?.extra?.apiKey as string) || "";
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = "mistralai/mistral-7b-instruct:free";
+
+async function callOpenRouter(
+  messages: { role: string; content: string }[]
+): Promise<string> {
+  if (!API_KEY) {
+    return "AI advisor is not configured. Please add your OpenRouter API key to enable real AI responses.";
+  }
+  try {
+    const res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://cashbuddy-nepal.app",
+        "X-Title": "CashBuddy Nepal Pro",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        max_tokens: 400,
+        temperature: 0.7,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return (
+      data.choices?.[0]?.message?.content?.trim() ||
+      "Sorry, I couldn't get a response. Please try again."
+    );
+  } catch (e) {
+    return "Connection error. Please check your internet and try again.";
+  }
+}
+
+function buildSystemPrompt(
   balance: number,
+  monthlyIncome: number,
   monthlyExpenses: number,
-  monthlyIncome: number
+  name: string
 ): string {
   const savings = monthlyIncome - monthlyExpenses;
-  const savingsRate = monthlyIncome > 0 ? (savings / monthlyIncome) * 100 : 0;
-  const lowerMsg = message.toLowerCase();
+  const savingsRate =
+    monthlyIncome > 0
+      ? ((savings / monthlyIncome) * 100).toFixed(0)
+      : "0";
+  return `You are CashBuddy AI, a personal financial advisor specialized in Nepal's economy and financial system. You are helping ${name}.
 
-  if (lowerMsg.includes("bike") || lowerMsg.includes("motorcycle")) {
-    const bikePrice = 200000;
-    const months = balance >= bikePrice ? 0 : Math.ceil((bikePrice - balance) / Math.max(savings, 1000));
-    if (balance >= bikePrice) {
-      return `Based on your current balance of ${formatAmount(balance)}, you can afford a bike right now! However, I recommend keeping at least Rs. 20,000 as emergency funds. Consider going for it if you've planned for fuel and maintenance costs.`;
-    }
-    return `You currently have ${formatAmount(balance)} saved. A standard bike costs around Rs. 2 lakhs. At your current savings rate of ${formatAmount(savings)}/month, you'd need ${months} months to save up. Try setting a specific "Bike Fund" goal in the Goals tab!`;
-  }
+Current Financial Data:
+- Total Balance: ${formatAmount(balance)}
+- This Month Income: ${formatAmount(monthlyIncome)}
+- This Month Expenses: ${formatAmount(monthlyExpenses)}
+- Savings Rate: ${savingsRate}%
+- Currency: Nepali Rupees (Rs./NPR)
 
-  if (lowerMsg.includes("save") && (lowerMsg.includes("5000") || lowerMsg.includes("rs."))) {
-    return `Great question! Here are 5 quick ways to save Rs. 5000:\n\n1. Cut dining out twice/week (Rs. 1,500)\n2. Use public transport (Rs. 800)\n3. Cancel unused subscriptions (Rs. 500)\n4. Cook at home more (Rs. 2,000)\n5. Avoid impulse shopping (Rs. 500)\n\nWith your current spending habits, this is very achievable within 1-2 weeks!`;
-  }
-
-  if (lowerMsg.includes("overspend") || lowerMsg.includes("spending too much")) {
-    const topCategory = monthlyExpenses > 0 ? "food & dining" : "various categories";
-    return `Based on your transactions, you're spending most on ${topCategory} this month. Your expenses are ${formatAmount(monthlyExpenses)} vs income of ${formatAmount(monthlyIncome)}. ${savingsRate < 20 ? "I recommend targeting a 20% savings rate. Try the 50-30-20 rule: 50% needs, 30% wants, 20% savings." : "You're doing well! Keep it up!"}`;
-  }
-
-  if (lowerMsg.includes("balance") || lowerMsg.includes("how much")) {
-    return `Your current total balance is ${formatAmount(balance)}. This month you've earned ${formatAmount(monthlyIncome)} and spent ${formatAmount(monthlyExpenses)}. Your savings rate is ${savingsRate.toFixed(0)}%. ${savingsRate >= 20 ? "Excellent financial health!" : "Consider reducing expenses to increase your savings rate above 20%."}`;
-  }
-
-  if (lowerMsg.includes("budget")) {
-    return `Smart budgeting tip for Nepal:\n\n• Rent/Housing: 30% of income (${formatAmount(monthlyIncome * 0.3)})\n• Food: 20% (${formatAmount(monthlyIncome * 0.2)})\n• Transport: 10% (${formatAmount(monthlyIncome * 0.1)})\n• Savings: 20% (${formatAmount(monthlyIncome * 0.2)})\n• Entertainment: 10% (${formatAmount(monthlyIncome * 0.1)})\n• Other: 10% (${formatAmount(monthlyIncome * 0.1)})\n\nSet these limits in the Budget section!`;
-  }
-
-  if (lowerMsg.includes("invest") || lowerMsg.includes("stock") || lowerMsg.includes("nepse")) {
-    return `Investment tips for Nepal:\n\n1. NEPSE (Nepal Stock Exchange) - Start with Rs. 10,000\n2. Mutual Funds (NMB, Global IME) - Low risk\n3. Fixed Deposits - Safe, 8-9% annual return\n4. Real Estate in growing areas\n\nI recommend keeping 6 months expenses (${formatAmount(monthlyExpenses * 6)}) as emergency fund before investing. Your current balance allows for smart investments!`;
-  }
-
-  if (lowerMsg.includes("predict") || lowerMsg.includes("future") || lowerMsg.includes("next month")) {
-    const predictedBalance = balance + savings;
-    return `Based on your current trend:\n\n• Expected income next month: ${formatAmount(monthlyIncome)}\n• Expected expenses: ${formatAmount(monthlyExpenses)}\n• Predicted balance: ${formatAmount(predictedBalance)}\n\n${predictedBalance > balance ? "Your balance should grow next month! Keep it up." : "Warning: Your expenses may exceed income. Review your spending."}`;
-  }
-
-  const responses = [
-    `Your financial health looks ${savingsRate >= 20 ? "great" : "okay"}! With ${formatAmount(balance)} balance and ${savingsRate.toFixed(0)}% savings rate this month, ${savingsRate >= 20 ? "you're on track for financial independence!" : "focus on increasing your savings to at least 20%."}`,
-    `Quick tip: For every Rs. 100 you earn, try to save Rs. 20. Currently you're saving ${formatAmount(savings)}/month. Set up automatic transfers to a savings account on payday!`,
-    `I analyzed your spending patterns. You could save an extra Rs. ${Math.round(monthlyExpenses * 0.1).toLocaleString()} per month by reducing discretionary spending by just 10%. Would you like specific suggestions?`,
-    `Did you know? Investing in a SIP (Systematic Investment Plan) of just Rs. 5,000/month can grow to Rs. 10 lakhs in 10 years at 12% annual return. Nepal has great mutual fund options!`,
-  ];
-
-  return responses[Math.floor(Math.random() * responses.length)];
+Guidelines:
+- Always respond in English but mention NPR/Rs. for amounts
+- Give practical, actionable advice relevant to Nepal (mention NEPSE, NRB policies, local banks like NIC Asia, Everest Bank, etc.)
+- Keep responses concise (3-5 sentences max) and conversational
+- Reference the user's actual balance/spending data when relevant
+- Suggest Nepal-specific investment options (NEPSE stocks, mutual funds, FD rates ~8-9%)
+- Be encouraging and supportive
+- If asked about something unrelated to finance, gently redirect to financial topics`;
 }
 
 const SUGGESTIONS = [
-  "Can I afford a bike?",
-  "How to save Rs. 5000 fast?",
-  "Am I overspending?",
-  "What's my balance?",
-  "Give me a budget plan",
-  "Investment tips for Nepal",
-  "Predict next month's balance",
+  "How's my financial health?",
+  "Tips to save more this month",
+  "Should I invest in NEPSE?",
+  "How to build an emergency fund?",
+  "Best banks in Nepal for savings?",
+  "How to budget on Rs. 50,000/month?",
 ];
 
 export default function AIChatScreen() {
   const insets = useSafeAreaInsets();
-  const { chatHistory, addChatMessage, clearChatHistory, getBalance, getMonthlyIncome, getMonthlyExpenses } = useApp();
+  const {
+    chatHistory,
+    addChatMessage,
+    clearChatHistory,
+    getBalance,
+    getMonthlyIncome,
+    getMonthlyExpenses,
+    profile,
+  } = useApp();
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const listRef = useRef<FlatList>(null);
@@ -100,29 +117,44 @@ export default function AIChatScreen() {
 
   const handleSend = async (msg?: string) => {
     const text = (msg ?? input).trim();
-    if (!text) return;
+    if (!text || isTyping) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInput("");
 
-    addChatMessage({ role: "user", content: text, timestamp: new Date().toISOString() });
+    addChatMessage({
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    });
     setIsTyping(true);
 
-    await new Promise((r) => setTimeout(r, 1200 + Math.random() * 800));
-
-    const response = generateAIResponse(
-      text,
+    const systemPrompt = buildSystemPrompt(
       getBalance(),
+      getMonthlyIncome(),
       getMonthlyExpenses(),
-      getMonthlyIncome()
+      profile.name
     );
 
-    addChatMessage({ role: "assistant", content: response, timestamp: new Date().toISOString() });
+    const conversationMessages = [
+      { role: "system", content: systemPrompt },
+      ...chatHistory.slice(-8).map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      { role: "user", content: text },
+    ];
+
+    const response = await callOpenRouter(conversationMessages);
+
+    addChatMessage({
+      role: "assistant",
+      content: response,
+      timestamp: new Date().toISOString(),
+    });
     setIsTyping(false);
 
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
@@ -148,10 +180,7 @@ export default function AIChatScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={["#060D1F", "#0A1628"]}
-        style={StyleSheet.absoluteFill}
-      />
+      <LinearGradient colors={["#060D1F", "#0A1628"]} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPadding }]}>
@@ -165,7 +194,9 @@ export default function AIChatScreen() {
           </View>
           <View>
             <Text style={styles.headerTitle}>AI Financial Advisor</Text>
-            <Text style={styles.headerSub}>Online • Nepal Expert</Text>
+            <Text style={styles.headerSub}>
+              {API_KEY ? "Powered by OpenRouter AI" : "Configure API Key to enable"}
+            </Text>
           </View>
         </View>
         <TouchableOpacity onPress={clearChatHistory} style={styles.clearBtn}>
@@ -187,7 +218,11 @@ export default function AIChatScreen() {
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
             chatHistory.length === 0 ? (
-              <WelcomeMessage onSuggest={handleSend} />
+              <WelcomeMessage
+                hasKey={!!API_KEY}
+                name={profile.name}
+                onSuggest={handleSend}
+              />
             ) : null
           }
           ListFooterComponent={
@@ -204,7 +239,7 @@ export default function AIChatScreen() {
           }
         />
 
-        {/* Suggestions */}
+        {/* Suggestions strip */}
         {chatHistory.length === 0 && (
           <FlatList
             horizontal
@@ -223,21 +258,22 @@ export default function AIChatScreen() {
           />
         )}
 
-        {/* Input */}
+        {/* Input bar */}
         <View style={[styles.inputBar, { paddingBottom: bottomPadding + 8 }]}>
           <TextInput
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder="Ask your financial question..."
+            placeholder="Ask anything about your finances..."
             placeholderTextColor={COLORS.darkTextSecondary}
             multiline
             maxLength={500}
+            editable={!isTyping}
           />
           <Pressable
             style={({ pressed }) => [
               styles.sendBtn,
-              { opacity: pressed || !input.trim() ? 0.6 : 1 },
+              { opacity: pressed || !input.trim() || isTyping ? 0.5 : 1 },
             ]}
             onPress={() => handleSend()}
             disabled={!input.trim() || isTyping}
@@ -255,19 +291,32 @@ export default function AIChatScreen() {
   );
 }
 
-function WelcomeMessage({ onSuggest }: { onSuggest: (s: string) => void }) {
+function WelcomeMessage({
+  hasKey,
+  name,
+  onSuggest,
+}: {
+  hasKey: boolean;
+  name: string;
+  onSuggest: (s: string) => void;
+}) {
   return (
     <Animated.View entering={FadeInDown.duration(500)} style={wStyles.container}>
-      <LinearGradient
-        colors={["#0D47A1", "#1565C0"]}
-        style={wStyles.iconContainer}
-      >
+      <LinearGradient colors={["#0D47A1", "#1565C0"]} style={wStyles.iconContainer}>
         <Feather name="cpu" size={32} color={COLORS.white} />
       </LinearGradient>
       <Text style={wStyles.title}>CashBuddy AI</Text>
       <Text style={wStyles.subtitle}>
-        Your personal financial advisor for Nepal. Ask me anything about your finances!
+        {hasKey
+          ? `Hi ${name.split(" ")[0]}! I'm your personal AI financial advisor for Nepal. Ask me anything about your money!`
+          : "AI advisor is ready. Your API key is configured and I'm connected to OpenRouter."}
       </Text>
+      {hasKey && (
+        <View style={wStyles.poweredBy}>
+          <Feather name="zap" size={11} color={COLORS.accent} />
+          <Text style={wStyles.poweredByText}>Powered by OpenRouter · Mistral 7B</Text>
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -306,17 +355,28 @@ const wStyles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 8,
   },
-  title: {
-    color: COLORS.white,
-    fontSize: 22,
-    fontFamily: "Inter_700Bold",
-  },
+  title: { color: COLORS.white, fontSize: 22, fontFamily: "Inter_700Bold" },
   subtitle: {
     color: COLORS.darkTextSecondary,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
     lineHeight: 22,
+  },
+  poweredBy: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: COLORS.accent + "18",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 4,
+  },
+  poweredByText: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
   },
 });
 
@@ -341,12 +401,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
   },
-  headerCenter: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
+  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   aiBadge: {
     width: 40,
     height: 40,
@@ -369,36 +424,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: COLORS.darkBg,
   },
-  headerTitle: {
-    color: COLORS.white,
-    fontSize: 16,
-    fontFamily: "Inter_700Bold",
-  },
-  headerSub: {
-    color: COLORS.success,
-    fontSize: 11,
-    fontFamily: "Inter_400Regular",
-  },
-  clearBtn: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  listContent: {
-    padding: 16,
-    gap: 12,
-    paddingBottom: 0,
-  },
-  messageRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
-    marginBottom: 8,
-  },
-  messageRowUser: {
-    justifyContent: "flex-end",
-  },
+  headerTitle: { color: COLORS.white, fontSize: 16, fontFamily: "Inter_700Bold" },
+  headerSub: { color: COLORS.success, fontSize: 11, fontFamily: "Inter_400Regular" },
+  clearBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  listContent: { padding: 16, gap: 12, paddingBottom: 0 },
+  messageRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, marginBottom: 8 },
+  messageRowUser: { justifyContent: "flex-end" },
   botAvatar: {
     width: 32,
     height: 32,
@@ -409,36 +440,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.primaryLight + "44",
   },
-  bubble: {
-    maxWidth: "75%",
-    borderRadius: 18,
-    padding: 14,
-  },
+  bubble: { maxWidth: "75%", borderRadius: 18, padding: 14 },
   botBubble: {
     backgroundColor: COLORS.darkCard,
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
     borderBottomLeftRadius: 4,
   },
-  userBubble: {
-    backgroundColor: COLORS.primary,
-    borderBottomRightRadius: 4,
-  },
+  userBubble: { backgroundColor: COLORS.primary, borderBottomRightRadius: 4 },
   bubbleText: {
     color: COLORS.darkText,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     lineHeight: 22,
   },
-  userBubbleText: {
-    color: COLORS.white,
-  },
-  typingRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
-    marginTop: 8,
-  },
+  userBubbleText: { color: COLORS.white },
+  typingRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, marginTop: 8, paddingHorizontal: 16 },
   typingBubble: {
     backgroundColor: COLORS.darkCard,
     borderRadius: 18,
@@ -447,11 +464,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
   },
-  suggestions: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
+  suggestions: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
   suggestion: {
     backgroundColor: COLORS.primary + "22",
     borderRadius: 20,
@@ -460,11 +473,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.primary + "44",
   },
-  suggestionText: {
-    color: COLORS.primaryLight,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
+  suggestionText: { color: COLORS.primaryLight, fontSize: 13, fontFamily: "Inter_500Medium" },
   inputBar: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -488,10 +497,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.darkBorder,
     maxHeight: 120,
   },
-  sendBtn: {
-    borderRadius: 20,
-    overflow: "hidden",
-  },
+  sendBtn: { borderRadius: 20, overflow: "hidden" },
   sendBtnGrad: {
     width: 44,
     height: 44,

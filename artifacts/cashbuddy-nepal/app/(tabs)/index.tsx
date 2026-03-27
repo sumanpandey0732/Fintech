@@ -1,9 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { useRef } from "react";
+import React from "react";
 import {
-  FlatList,
   Platform,
   Pressable,
   RefreshControl,
@@ -13,10 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Animated, {
-  FadeInDown,
-  FadeInUp,
-} from "react-native-reanimated";
+import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BalanceCard } from "@/components/BalanceCard";
 import { GradientBackground } from "@/components/GradientBackground";
@@ -25,16 +22,33 @@ import COLORS from "@/constants/colors";
 import { CATEGORY_CONFIG, formatAmount } from "@/constants/categories";
 import { useApp } from "@/context/AppContext";
 
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { transactions, profile, getBalance, getMonthlyIncome, getMonthlyExpenses, budgets, goals } = useApp();
+  const {
+    transactions,
+    profile,
+    getBalance,
+    getMonthlyIncome,
+    getMonthlyExpenses,
+    getCategorySpending,
+    budgets,
+    goals,
+  } = useApp();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const balance = getBalance();
   const income = getMonthlyIncome();
   const expenses = getMonthlyExpenses();
+  const savings = income - expenses;
+  const savingsRate = income > 0 ? ((savings / income) * 100).toFixed(0) : "0";
   const recentTx = transactions.slice(0, 5);
-
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 16;
 
   const onRefresh = () => {
@@ -46,14 +60,21 @@ export default function HomeScreen() {
     (b) => b.spent / b.limit >= 0.8 && b.limit > 0
   );
   const nearGoal = goals.find(
-    (g) => g.currentAmount / g.targetAmount >= 0.9 && g.currentAmount < g.targetAmount
+    (g) =>
+      g.currentAmount / g.targetAmount >= 0.9 &&
+      g.currentAmount < g.targetAmount
   );
+
+  const categorySpending = getCategorySpending();
+  const topCategory = Object.entries(categorySpending).sort(
+    ([, a], [, b]) => b - a
+  )[0];
 
   return (
     <GradientBackground colors={["#060D1F", "#0A1628", "#0D1B4B"]}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 120 : 120 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -69,7 +90,7 @@ export default function HomeScreen() {
           style={[styles.header, { paddingTop: topPadding }]}
         >
           <View>
-            <Text style={styles.greeting}>Good morning,</Text>
+            <Text style={styles.greeting}>{getGreeting()},</Text>
             <Text style={styles.userName}>{profile.name.split(" ")[0]}</Text>
           </View>
           <View style={styles.headerActions}>
@@ -84,22 +105,17 @@ export default function HomeScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.notifBtn, { backgroundColor: COLORS.accent + "22" }]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
             >
               <Feather name="bell" size={20} color={COLORS.accent} />
             </TouchableOpacity>
           </View>
         </Animated.View>
 
-        {/* Level Badge */}
-        <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.levelRow}>
+        {/* Level + streak */}
+        <Animated.View entering={FadeInDown.delay(80).duration(500)} style={styles.levelRow}>
           <View style={styles.levelBadge}>
             <Feather name="zap" size={12} color={COLORS.accent} />
-            <Text style={styles.levelText}>
-              Level {profile.level} • {profile.xp} XP
-            </Text>
+            <Text style={styles.levelText}>Level {profile.level} · {profile.xp} XP</Text>
           </View>
           <View style={styles.streakBadge}>
             <Feather name="calendar" size={12} color={COLORS.success} />
@@ -108,41 +124,49 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* Balance Card */}
-        <Animated.View entering={FadeInUp.delay(150).duration(600)} style={styles.balanceSection}>
+        <Animated.View entering={FadeInUp.delay(120).duration(600)} style={{ marginBottom: 20 }}>
           <BalanceCard balance={balance} income={income} expenses={expenses} />
         </Animated.View>
 
+        {/* Monthly Insights Row */}
+        {income > 0 || expenses > 0 ? (
+          <Animated.View entering={FadeInDown.delay(160).duration(500)} style={styles.insightRow}>
+            <InsightCard
+              icon="pie-chart"
+              label="Savings Rate"
+              value={`${savingsRate}%`}
+              color={parseFloat(savingsRate) >= 20 ? COLORS.success : COLORS.accentOrange}
+              sub={parseFloat(savingsRate) >= 20 ? "Healthy" : "Improve"}
+            />
+            <InsightCard
+              icon="trending-down"
+              label="Top Spend"
+              value={topCategory ? CATEGORY_CONFIG[topCategory[0] as any]?.label ?? "—" : "—"}
+              color={COLORS.primaryLight}
+              sub={topCategory ? formatAmount(topCategory[1]) : "No data"}
+            />
+            <InsightCard
+              icon="target"
+              label="Goals"
+              value={`${goals.length}`}
+              color={COLORS.accent}
+              sub={`${goals.filter(g => g.currentAmount >= g.targetAmount).length} done`}
+            />
+          </Animated.View>
+        ) : null}
+
         {/* Quick Actions */}
         <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.quickActions}>
-          <QuickAction
-            icon="plus"
-            label="Add"
-            color={COLORS.success}
-            onPress={() => router.push("/add-transaction")}
-          />
-          <QuickAction
-            icon="trending-up"
-            label="Analytics"
-            color={COLORS.primaryLight}
-            onPress={() => router.push("/(tabs)/analytics")}
-          />
-          <QuickAction
-            icon="target"
-            label="Goals"
-            color={COLORS.accent}
-            onPress={() => router.push("/(tabs)/goals")}
-          />
-          <QuickAction
-            icon="message-circle"
-            label="AI Tips"
-            color="#A78BFA"
-            onPress={() => router.push("/ai-chat")}
-          />
+          <QuickAction icon="plus" label="Add" color={COLORS.success} onPress={() => router.push("/add-transaction")} />
+          <QuickAction icon="bar-chart-2" label="Analytics" color={COLORS.primaryLight} onPress={() => router.push("/(tabs)/analytics")} />
+          <QuickAction icon="target" label="Goals" color={COLORS.accent} onPress={() => router.push("/(tabs)/goals")} />
+          <QuickAction icon="cpu" label="AI Tips" color="#A78BFA" onPress={() => router.push("/ai-chat")} />
+          <QuickAction icon="shield" label="Budget" color={COLORS.accentOrange} onPress={() => router.push("/budget-setup")} />
         </Animated.View>
 
         {/* Alerts */}
         {(alertBudgets.length > 0 || nearGoal) && (
-          <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.section}>
+          <Animated.View entering={FadeInDown.delay(240).duration(500)} style={styles.section}>
             <Text style={styles.sectionTitle}>Alerts</Text>
             {alertBudgets.slice(0, 2).map((b) => (
               <View key={b.category} style={styles.alertCard}>
@@ -174,7 +198,7 @@ export default function HomeScreen() {
         )}
 
         {/* Recent Transactions */}
-        <Animated.View entering={FadeInDown.delay(300).duration(500)} style={styles.section}>
+        <Animated.View entering={FadeInDown.delay(280).duration(500)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent</Text>
             <TouchableOpacity onPress={() => router.push("/(tabs)/analytics")}>
@@ -183,14 +207,22 @@ export default function HomeScreen() {
           </View>
 
           {recentTx.length === 0 ? (
-            <View style={styles.empty}>
-              <Feather name="inbox" size={32} color={COLORS.darkTextSecondary} />
-              <Text style={styles.emptyText}>No transactions yet</Text>
+            <View style={styles.emptyBox}>
+              <LinearGradient
+                colors={["#0D47A1", "#1565C0"]}
+                style={styles.emptyIcon}
+              >
+                <Feather name="plus-circle" size={28} color={COLORS.white} />
+              </LinearGradient>
+              <Text style={styles.emptyTitle}>No transactions yet</Text>
+              <Text style={styles.emptySubtitle}>
+                Start tracking your income and expenses to see insights here.
+              </Text>
               <TouchableOpacity
                 style={styles.emptyBtn}
                 onPress={() => router.push("/add-transaction")}
               >
-                <Text style={styles.emptyBtnText}>Add your first one</Text>
+                <Text style={styles.emptyBtnText}>Add First Transaction</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -210,6 +242,49 @@ export default function HomeScreen() {
             </View>
           )}
         </Animated.View>
+
+        {/* Financial Health Card */}
+        {transactions.length > 0 && (
+          <Animated.View entering={FadeInDown.delay(320).duration(500)} style={styles.section}>
+            <Text style={styles.sectionTitle}>Financial Health</Text>
+            <LinearGradient
+              colors={["#0D1B4B", "#1565C0"]}
+              style={styles.healthCard}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.healthRow}>
+                <HealthItem
+                  label="Balance"
+                  value={balance >= 0 ? "Good" : "Negative"}
+                  ok={balance >= 0}
+                />
+                <HealthItem
+                  label="Savings"
+                  value={parseFloat(savingsRate) >= 20 ? "Healthy" : "Low"}
+                  ok={parseFloat(savingsRate) >= 20}
+                />
+                <HealthItem
+                  label="Tracking"
+                  value={transactions.length >= 5 ? "Active" : "Start"}
+                  ok={transactions.length >= 5}
+                />
+                <HealthItem
+                  label="Goals"
+                  value={goals.length > 0 ? "Set" : "None"}
+                  ok={goals.length > 0}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.healthBtn}
+                onPress={() => router.push("/ai-chat")}
+              >
+                <Feather name="cpu" size={14} color={COLORS.white} />
+                <Text style={styles.healthBtnText}>Get AI Advice</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </Animated.View>
+        )}
       </ScrollView>
 
       {/* FAB */}
@@ -225,6 +300,72 @@ export default function HomeScreen() {
     </GradientBackground>
   );
 }
+
+function InsightCard({
+  icon,
+  label,
+  value,
+  color,
+  sub,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  color: string;
+  sub: string;
+}) {
+  return (
+    <View style={iStyles.card}>
+      <View style={[iStyles.icon, { backgroundColor: color + "22" }]}>
+        <Feather name={icon as any} size={16} color={color} />
+      </View>
+      <Text style={iStyles.value}>{value}</Text>
+      <Text style={iStyles.label}>{label}</Text>
+      <Text style={[iStyles.sub, { color }]}>{sub}</Text>
+    </View>
+  );
+}
+
+const iStyles = StyleSheet.create({
+  card: {
+    flex: 1,
+    backgroundColor: COLORS.darkCard,
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: COLORS.darkBorder,
+  },
+  icon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
+  value: { color: COLORS.white, fontSize: 14, fontFamily: "Inter_700Bold" },
+  label: { color: COLORS.darkTextSecondary, fontSize: 10, fontFamily: "Inter_400Regular" },
+  sub: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
+});
+
+function HealthItem({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <View style={hStyles.item}>
+      <View style={[hStyles.dot, { backgroundColor: ok ? COLORS.success : COLORS.accentOrange }]} />
+      <Text style={hStyles.value}>{value}</Text>
+      <Text style={hStyles.label}>{label}</Text>
+    </View>
+  );
+}
+
+const hStyles = StyleSheet.create({
+  item: { flex: 1, alignItems: "center", gap: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  value: { color: COLORS.white, fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  label: { color: "rgba(255,255,255,0.5)", fontSize: 10, fontFamily: "Inter_400Regular" },
+});
 
 function QuickAction({
   icon,
@@ -256,21 +397,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 12,
   },
-  greeting: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-  },
-  userName: {
-    color: COLORS.white,
-    fontSize: 24,
-    fontFamily: "Inter_700Bold",
-    marginTop: 2,
-  },
-  headerActions: {
-    flexDirection: "row",
-    gap: 10,
-  },
+  greeting: { color: COLORS.darkTextSecondary, fontSize: 14, fontFamily: "Inter_400Regular" },
+  userName: { color: COLORS.white, fontSize: 24, fontFamily: "Inter_700Bold", marginTop: 2 },
+  headerActions: { flexDirection: "row", gap: 10 },
   notifBtn: {
     width: 44,
     height: 44,
@@ -281,12 +410,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
   },
-  levelRow: {
-    flexDirection: "row",
-    paddingHorizontal: 20,
-    gap: 10,
-    marginBottom: 16,
-  },
+  levelRow: { flexDirection: "row", paddingHorizontal: 20, gap: 10, marginBottom: 16 },
   levelBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -298,11 +422,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.accent + "33",
   },
-  levelText: {
-    color: COLORS.accent,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
+  levelText: { color: COLORS.accent, fontSize: 12, fontFamily: "Inter_600SemiBold" },
   streakBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -314,59 +434,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.success + "33",
   },
-  streakText: {
-    color: COLORS.success,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  balanceSection: {
-    marginBottom: 20,
-  },
-  quickActions: {
-    flexDirection: "row",
-    paddingHorizontal: 16,
-    gap: 10,
-    marginBottom: 24,
-  },
-  qaItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 8,
-  },
+  streakText: { color: COLORS.success, fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  insightRow: { flexDirection: "row", paddingHorizontal: 16, gap: 10, marginBottom: 20 },
+  quickActions: { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 24, flexWrap: "nowrap" },
+  qaItem: { flex: 1, alignItems: "center", gap: 8 },
   qaIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
+    width: 50,
+    height: 50,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
   },
-  qaLabel: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-  },
-  section: {
-    marginBottom: 24,
-    paddingHorizontal: 20,
-  },
+  qaLabel: { color: COLORS.darkTextSecondary, fontSize: 11, fontFamily: "Inter_500Medium" },
+  section: { marginBottom: 24, paddingHorizontal: 20 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 14,
   },
-  sectionTitle: {
-    color: COLORS.white,
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-  },
-  seeAll: {
-    color: COLORS.primaryLight,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
+  sectionTitle: { color: COLORS.white, fontSize: 18, fontFamily: "Inter_700Bold" },
+  seeAll: { color: COLORS.primaryLight, fontSize: 14, fontFamily: "Inter_600SemiBold" },
   txList: {
     backgroundColor: COLORS.darkCard,
     borderRadius: 20,
@@ -374,31 +464,40 @@ const styles = StyleSheet.create({
     borderColor: COLORS.darkBorder,
     overflow: "hidden",
   },
-  empty: {
-    alignItems: "center",
-    paddingVertical: 32,
-    gap: 12,
+  emptyBox: {
     backgroundColor: COLORS.darkCard,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
+    alignItems: "center",
+    paddingVertical: 36,
+    paddingHorizontal: 24,
+    gap: 10,
   },
-  emptyText: {
+  emptyIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  emptyTitle: { color: COLORS.white, fontSize: 17, fontFamily: "Inter_700Bold" },
+  emptySubtitle: {
     color: COLORS.darkTextSecondary,
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 22,
   },
   emptyBtn: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     borderRadius: 20,
+    marginTop: 4,
   },
-  emptyBtnText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
+  emptyBtnText: { color: COLORS.white, fontSize: 14, fontFamily: "Inter_600SemiBold" },
   alertCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -410,22 +509,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.error + "33",
   },
-  alertDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  alertDot: { width: 8, height: 8, borderRadius: 4 },
+  alertText: { color: COLORS.darkText, fontSize: 14, fontFamily: "Inter_500Medium" },
+  alertSub: { color: COLORS.darkTextSecondary, fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+  healthCard: {
+    borderRadius: 20,
+    padding: 20,
+    gap: 16,
+    overflow: "hidden",
   },
-  alertText: {
-    color: COLORS.darkText,
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
+  healthRow: { flexDirection: "row", justifyContent: "space-around" },
+  healthBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 12,
+    paddingVertical: 10,
   },
-  alertSub: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 2,
-  },
+  healthBtnText: { color: COLORS.white, fontSize: 14, fontFamily: "Inter_600SemiBold" },
   fab: {
     position: "absolute",
     bottom: 90,

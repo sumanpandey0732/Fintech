@@ -1,90 +1,110 @@
-# Building CashBuddy Nepal APK
+# CashBuddy Nepal - APK Build Instructions
 
-## Prerequisites
-1. Install EAS CLI globally:
-   ```bash
-   npm install -g eas-cli
-   ```
+## IMPORTANT
+- This is a React Native app - it CANNOT run in web browser preview
+- The "404 page not found" error is EXPECTED in browser
+- You MUST build an APK to run on Android device/emulator
 
-2. Navigate to the project directory:
-   ```bash
-   cd artifacts/cashbuddy-nepal
-   ```
+---
 
-## Step-by-Step Build Instructions
+## Quick Build (Copy-Paste These Commands)
 
-### 1. Login to Expo Account
+Open terminal on your computer and run:
+
+```bash
+# 1. Extract and navigate to project folder
+cd cashbuddy-nepal
+
+# 2. Install dependencies
+npm install
+
+# 3. Install EAS CLI
+npm install -g eas-cli
+
+# 4. Login to Expo (enter your email and password when asked)
+eas login
+
+# 5. Build APK (takes 10-20 minutes)
+eas build --platform android --profile preview
+```
+
+After build completes, you'll get a download link for the APK file.
+
+---
+
+## Detailed Steps
+
+### Step 1: Download Project
+1. Click the three dots (...) in top right of v0
+2. Select "Download ZIP"
+3. Extract the ZIP file
+
+### Step 2: Install Tools
+Make sure you have:
+- Node.js 18+ (download from nodejs.org)
+- npm (comes with Node.js)
+
+### Step 3: Open Terminal
+- Windows: Press `Win + R`, type `cmd`, press Enter
+- Mac: Press `Cmd + Space`, type `Terminal`, press Enter
+- Linux: Press `Ctrl + Alt + T`
+
+### Step 4: Navigate to Project
+```bash
+cd path/to/cashbuddy-nepal
+```
+
+### Step 5: Install Dependencies
+```bash
+npm install
+```
+
+### Step 6: Install EAS CLI
+```bash
+npm install -g eas-cli
+```
+
+### Step 7: Login to Expo
 ```bash
 eas login
 ```
-Enter your credentials when prompted:
-- Email: sumanpandey0732@gmail.com
-- Password: (enter your password)
+Enter your email and password when prompted.
 
-### 2. Configure EAS Project
-If this is your first time, initialize EAS:
-```bash
-eas build:configure
-```
-This will update your `app.json` with the correct project ID.
-
-### 3. Build the APK
-
-#### Option A: Development Build (for testing)
-```bash
-eas build --platform android --profile development
-```
-
-#### Option B: Preview Build (internal distribution)
+### Step 8: Build APK
 ```bash
 eas build --platform android --profile preview
 ```
 
-#### Option C: Production Build (for release)
-```bash
-eas build --platform android --profile production
-```
+### Step 9: Download APK
+- Build takes 10-20 minutes
+- When done, you'll see a download URL
+- Download the APK and install on your Android phone
 
-### 4. Download the APK
-After the build completes, you'll receive a URL to download the APK file.
-Or use:
-```bash
-eas build:list
-```
-Then download from the Expo dashboard.
-
-## Quick Build Command (All-in-one)
-```bash
-# Login and build preview APK
-eas login && eas build --platform android --profile preview --non-interactive
-```
+---
 
 ## Troubleshooting
 
-### If build fails with "Project not found":
+**"Command not found: eas"**
 ```bash
-eas project:init
+npm install -g eas-cli
 ```
 
-### If you need to update the project ID:
-Edit `app.json` and update the `extra.eas.projectId` field with your actual project ID from expo.dev
-
-### Clear cache if needed:
+**"Not logged in"**
 ```bash
-npx expo start --clear
+eas login
 ```
 
-## Build Profiles Explained
+**Build fails with errors**
+```bash
+# Clear cache and try again
+npm cache clean --force
+rm -rf node_modules
+npm install
+eas build --platform android --profile preview --clear-cache
+```
 
-| Profile | Type | Use Case |
-|---------|------|----------|
-| development | APK | Testing with Expo Go features |
-| preview | APK | Internal testing/distribution |
-| production | AAB/APK | Play Store release |
+---
 
-## After Building
-
-The APK will be available for download from:
-1. The terminal link after build completion
-2. expo.dev dashboard under your project builds
-3. `eas build:list` command output
+## Security Warning
+NEVER share your Expo account password publicly.
+If you have shared it, change it immediately at expo.dev

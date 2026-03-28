@@ -2,6 +2,7 @@ export default {
   expo: {
     name: "CashBuddy Nepal Pro",
     slug: "cashbuddy-nepal",
+    owner: "idkfuckyou",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
@@ -48,6 +49,9 @@ export default {
     },
     extra: {
       apiKey: process.env.API_KEY || "",
+      eas: {
+        projectId: "9124ed85-1afb-48ca-8b54-3b70148083c6",
+      },
     },
   },
 };

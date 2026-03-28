@@ -8,14 +8,20 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { CATEGORY_CONFIG } from "@/constants/categories";
-import { scheduleAllNotifications } from "@/utils/notifications";
+import { 
+  scheduleAllNotifications, 
+  sendLowBalanceAlert, 
+  sendDailySummaryNotification,
+  sendSavingsTip,
+} from "@/utils/notifications";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -23,7 +29,10 @@ const queryClient = new QueryClient();
 
 function NotificationSetup() {
   const { profile, getBalance, getMonthlyExpenses, transactions, budgets } = useApp();
+  const lastCheckRef = useRef<string>("");
+  const appState = useRef(AppState.currentState);
 
+  // Schedule all notifications when app data changes
   useEffect(() => {
     if (!profile.isOnboarded || !profile.name) return;
 
@@ -37,6 +46,11 @@ function NotificationSetup() {
       .filter((t) => t.type === "expense" && new Date(t.date) >= sevenDaysAgo)
       .reduce((s, t) => s + t.amount, 0);
 
+    const todayStr = now.toISOString().slice(0, 10);
+    const todayExpenses = transactions
+      .filter((t) => t.type === "expense" && t.date.slice(0, 10) === todayStr)
+      .reduce((s, t) => s + t.amount, 0);
+
     const budgetAlerts = budgets
       .filter((b) => b.limit > 0 && b.spent / b.limit >= 0.8)
       .map((b) => ({
@@ -47,14 +61,66 @@ function NotificationSetup() {
     scheduleAllNotifications({
       balance,
       name: profile.name,
-      todayExpenses: transactions
-        .filter((t) => t.type === "expense" && t.date.slice(0, 10) === now.toISOString().slice(0, 10))
-        .reduce((s, t) => s + t.amount, 0),
+      todayExpenses,
       weeklyExpenses,
       streak: profile.streak,
       budgetAlerts,
     });
+
+    // Check for low balance and send immediate alert if needed
+    const checkKey = `${balance}-${todayStr}`;
+    if (checkKey !== lastCheckRef.current) {
+      lastCheckRef.current = checkKey;
+      
+      if (balance < 0) {
+        sendLowBalanceAlert(balance, "critical");
+      } else if (balance < 5000) {
+        sendLowBalanceAlert(balance, "low");
+      }
+    }
   }, [profile.isOnboarded, profile.name, profile.streak, transactions.length, budgets.length]);
+
+  // Handle app coming to foreground - send daily summary
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      if (
+        appState.current.match(/inactive|background/) &&
+        nextAppState === "active" &&
+        profile.isOnboarded
+      ) {
+        const balance = getBalance();
+        const now = new Date();
+        const todayStr = now.toISOString().slice(0, 10);
+        
+        const todaySpent = transactions
+          .filter((t) => t.type === "expense" && t.date.slice(0, 10) === todayStr)
+          .reduce((s, t) => s + t.amount, 0);
+          
+        const todayIncome = transactions
+          .filter((t) => t.type === "income" && t.date.slice(0, 10) === todayStr)
+          .reduce((s, t) => s + t.amount, 0);
+
+        // Send low balance alert on app open if balance is low
+        if (balance < 5000) {
+          if (balance < 0) {
+            sendLowBalanceAlert(balance, "critical");
+          } else {
+            sendLowBalanceAlert(balance, "low");
+          }
+        }
+
+        // Occasionally send a savings tip (random chance)
+        if (Math.random() < 0.15) {
+          setTimeout(() => sendSavingsTip(), 5000);
+        }
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [profile.isOnboarded, transactions, getBalance]);
 
   return null;
 }

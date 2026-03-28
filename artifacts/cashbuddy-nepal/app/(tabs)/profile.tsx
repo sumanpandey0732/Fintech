@@ -2,7 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { useRef } from "react";
+import React from "react";
 import {
   Alert,
   Platform,
@@ -24,11 +24,13 @@ import {
   getXpForNextLevel,
   useApp,
 } from "@/context/AppContext";
+import { exportTransactionsToCSV, exportMonthlySummary } from "@/utils/export";
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { profile, updateProfile, achievements, goals, transactions } = useApp();
+  const { profile, updateProfile, achievements, goals, transactions, getBalance } = useApp();
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 16;
+  const balance = getBalance();
 
   const xpForNext = getXpForNextLevel(profile.level);
   const levelTitle = getLevelTitle(profile.level);
@@ -55,6 +57,30 @@ export default function ProfileScreen() {
             await updateProfile({ isOnboarded: false, name: "", startingBalance: 0 });
             // Force reload via full state reset
             router.replace("/");
+          },
+        },
+      ]
+    );
+  };
+
+  const handleExportData = () => {
+    Alert.alert(
+      "Export Data",
+      "Choose export format:",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "CSV (Transactions)",
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            await exportTransactionsToCSV(transactions);
+          },
+        },
+        {
+          text: "Monthly Report",
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            await exportMonthlySummary(transactions, balance, profile.name);
           },
         },
       ]
@@ -210,11 +236,13 @@ export default function ProfileScreen() {
               label="Security & PIN"
               right={<Feather name="chevron-right" size={18} color={COLORS.darkTextSecondary} />}
             />
-            <SettingRow
-              icon="download"
-              label="Export Data"
-              right={<Feather name="chevron-right" size={18} color={COLORS.darkTextSecondary} />}
-            />
+            <TouchableOpacity onPress={handleExportData}>
+              <SettingRow
+                icon="download"
+                label="Export Data"
+                right={<Feather name="chevron-right" size={18} color={COLORS.darkTextSecondary} />}
+              />
+            </TouchableOpacity>
             <TouchableOpacity onPress={handleClearData}>
               <SettingRow
                 icon="trash-2"

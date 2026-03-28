@@ -2,14 +2,18 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import {
+  Alert,
+  Dimensions,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -22,8 +26,19 @@ import { SmartInsightCard } from "@/components/SmartInsightCard";
 import { TransactionItem } from "@/components/TransactionItem";
 import { WeeklyHeatmap } from "@/components/WeeklyHeatmap";
 import COLORS from "@/constants/colors";
-import { CATEGORY_CONFIG, formatAmount } from "@/constants/categories";
-import { useApp } from "@/context/AppContext";
+import { CATEGORY_CONFIG, formatAmount, EXPENSE_CATEGORIES } from "@/constants/categories";
+import { useApp, TransactionCategory } from "@/context/AppContext";
+import { sendLowBalanceAlert, sendTransactionConfirmation } from "@/utils/notifications";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+// Quick expense shortcuts - common amounts and categories
+const QUICK_EXPENSES = [
+  { amount: 50, category: "food" as TransactionCategory, label: "Tea/Coffee", icon: "coffee" },
+  { amount: 100, category: "food" as TransactionCategory, label: "Snacks", icon: "shopping-bag" },
+  { amount: 150, category: "transport" as TransactionCategory, label: "Local Ride", icon: "navigation" },
+  { amount: 500, category: "food" as TransactionCategory, label: "Lunch", icon: "coffee" },
+];
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -169,8 +184,51 @@ export default function HomeScreen() {
     getCategorySpending,
     budgets,
     goals,
+    addTransaction,
   } = useApp();
-  const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showQuickExpense, setShowQuickExpense] = useState(false);
+  const [quickExpenseAmount, setQuickExpenseAmount] = useState("");
+  const [selectedQuickCategory, setSelectedQuickCategory] = useState<TransactionCategory>("food");
+
+  // Quick expense handler
+  const handleQuickExpense = async (amount: number, category: TransactionCategory, label: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    await addTransaction({
+      type: "expense",
+      amount,
+      category,
+      note: label,
+      date: new Date().toISOString(),
+      tags: [],
+      recurring: "none",
+    });
+
+    await sendTransactionConfirmation("expense", amount, CATEGORY_CONFIG[category].label);
+
+    // Check for low balance
+    const newBalance = getBalance() - amount;
+    if (newBalance < 0) {
+      await sendLowBalanceAlert(newBalance, "critical");
+    } else if (newBalance < 5000) {
+      await sendLowBalanceAlert(newBalance, "low");
+    }
+
+    Alert.alert("Quick Expense Added", `Rs. ${amount} for ${label} recorded!`);
+  };
+
+  const handleCustomQuickExpense = async () => {
+    const parsed = parseFloat(quickExpenseAmount);
+    if (isNaN(parsed) || parsed <= 0) {
+      Alert.alert("Invalid Amount", "Please enter a valid amount");
+      return;
+    }
+
+    await handleQuickExpense(parsed, selectedQuickCategory, CATEGORY_CONFIG[selectedQuickCategory].label);
+    setShowQuickExpense(false);
+    setQuickExpenseAmount("");
+  };
 
   const balance = getBalance();
   const income = getMonthlyIncome();
@@ -309,6 +367,32 @@ export default function HomeScreen() {
           <QuickAction icon="shield" label="Budget" color={COLORS.accentOrange} onPress={() => router.push("/budget-setup")} />
         </Animated.View>
 
+        {/* Quick Expense Shortcuts - NEW FEATURE */}
+        <Animated.View entering={FadeInDown.delay(210).duration(500)} style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Quick Expense</Text>
+            <TouchableOpacity onPress={() => setShowQuickExpense(true)}>
+              <Text style={styles.seeAll}>Custom +</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.quickExpenseRow}>
+            {QUICK_EXPENSES.map((item, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={styles.quickExpenseCard}
+                onPress={() => handleQuickExpense(item.amount, item.category, item.label)}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.quickExpenseIcon, { backgroundColor: CATEGORY_CONFIG[item.category].color + "22" }]}>
+                  <Feather name={item.icon as any} size={18} color={CATEGORY_CONFIG[item.category].color} />
+                </View>
+                <Text style={styles.quickExpenseLabel} numberOfLines={1}>{item.label}</Text>
+                <Text style={styles.quickExpenseAmount}>Rs.{item.amount}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Animated.View>
+
         {/* Smart Insights Carousel */}
         <Animated.View entering={FadeInDown.delay(230).duration(500)}>
           <SmartInsightCard insights={smartInsights} />
@@ -429,6 +513,64 @@ export default function HomeScreen() {
       >
         <Feather name="plus" size={26} color={COLORS.white} />
       </Pressable>
+
+      {/* Quick Expense Modal */}
+      <Modal
+        visible={showQuickExpense}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowQuickExpense(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Quick Expense</Text>
+              <TouchableOpacity onPress={() => setShowQuickExpense(false)}>
+                <Feather name="x" size={24} color={COLORS.white} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalLabel}>Amount (Rs.)</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={quickExpenseAmount}
+              onChangeText={setQuickExpenseAmount}
+              keyboardType="decimal-pad"
+              placeholder="Enter amount"
+              placeholderTextColor={COLORS.darkTextSecondary}
+            />
+
+            <Text style={styles.modalLabel}>Category</Text>
+            <View style={styles.categoryGrid}>
+              {EXPENSE_CATEGORIES.slice(0, 6).map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.categoryChip,
+                    selectedQuickCategory === cat && { backgroundColor: CATEGORY_CONFIG[cat].color + "33", borderColor: CATEGORY_CONFIG[cat].color },
+                  ]}
+                  onPress={() => setSelectedQuickCategory(cat)}
+                >
+                  <Feather name={CATEGORY_CONFIG[cat].icon as any} size={16} color={selectedQuickCategory === cat ? CATEGORY_CONFIG[cat].color : COLORS.darkTextSecondary} />
+                  <Text style={[styles.categoryChipText, selectedQuickCategory === cat && { color: CATEGORY_CONFIG[cat].color }]}>
+                    {CATEGORY_CONFIG[cat].label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity style={styles.modalButton} onPress={handleCustomQuickExpense}>
+              <LinearGradient
+                colors={["#B71C1C", "#EF5350"]}
+                style={styles.modalButtonInner}
+              >
+                <Feather name="arrow-down-circle" size={20} color={COLORS.white} />
+                <Text style={styles.modalButtonText}>Add Expense</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </GradientBackground>
   );
 }
@@ -662,5 +804,121 @@ const styles = StyleSheet.create({
     elevation: 12,
     borderWidth: 2,
     borderColor: COLORS.primaryLight,
+  },
+  // Quick Expense styles
+  quickExpenseRow: {
+    flexDirection: "row",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  quickExpenseCard: {
+    flex: 1,
+    minWidth: (SCREEN_WIDTH - 60) / 4,
+    backgroundColor: COLORS.darkCard,
+    borderRadius: 16,
+    padding: 12,
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.darkBorder,
+  },
+  quickExpenseIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickExpenseLabel: {
+    color: COLORS.darkTextSecondary,
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    textAlign: "center",
+  },
+  quickExpenseAmount: {
+    color: COLORS.error,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.8)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: COLORS.darkCard,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+    gap: 16,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  modalTitle: {
+    color: COLORS.white,
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+  },
+  modalLabel: {
+    color: COLORS.darkTextSecondary,
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  modalInput: {
+    backgroundColor: COLORS.darkBg,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: COLORS.white,
+    fontSize: 18,
+    fontFamily: "Inter_600SemiBold",
+    borderWidth: 1,
+    borderColor: COLORS.darkBorder,
+  },
+  categoryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: COLORS.darkBg,
+    borderWidth: 1,
+    borderColor: COLORS.darkBorder,
+    gap: 6,
+  },
+  categoryChipText: {
+    color: COLORS.darkTextSecondary,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  modalButton: {
+    borderRadius: 16,
+    overflow: "hidden",
+    marginTop: 8,
+  },
+  modalButtonInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 16,
+  },
+  modalButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
   },
 });

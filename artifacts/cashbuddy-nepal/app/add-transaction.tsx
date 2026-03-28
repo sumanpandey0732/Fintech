@@ -5,6 +5,8 @@ import { router } from "expo-router";
 import React, { useRef, useState } from "react";
 import {
   Alert,
+  Dimensions,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -12,19 +14,24 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import COLORS from "@/constants/colors";
 import { TransactionCategory, TransactionType, useApp } from "@/context/AppContext";
-import { sendTransactionConfirmation } from "@/utils/notifications";
+import { sendTransactionConfirmation, sendLowBalanceAlert } from "@/utils/notifications";
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 const RECURRING_OPTIONS = ["none", "daily", "weekly", "monthly"] as const;
+const QUICK_AMOUNTS = [100, 500, 1000, 5000];
 
 export default function AddTransactionScreen() {
   const insets = useSafeAreaInsets();
-  const { addTransaction } = useApp();
+  const { addTransaction, getBalance } = useApp();
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const [type, setType] = useState<TransactionType>("expense");
   const [amount, setAmount] = useState("");
@@ -65,8 +72,23 @@ export default function AddTransactionScreen() {
 
     await sendTransactionConfirmation(type, parsed, category);
 
+    // Check for low balance after expense and send alert
+    if (type === "expense") {
+      const newBalance = getBalance();
+      if (newBalance < 5000 && newBalance >= 0) {
+        await sendLowBalanceAlert(newBalance, "low");
+      } else if (newBalance < 0) {
+        await sendLowBalanceAlert(newBalance, "critical");
+      }
+    }
+
     setSaving(false);
     router.back();
+  };
+
+  const handleQuickAmount = (amt: number) => {
+    setAmount(amt.toString());
+    Haptics.selectionAsync();
   };
 
   return (
@@ -106,15 +128,21 @@ export default function AddTransactionScreen() {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 25}
       >
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPadding + 100 }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          bounces={false}
-        >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            ref={scrollViewRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPadding + 140 }]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            bounces={true}
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+            onContentSizeChange={() => {
+              // Auto-scroll when content changes (keyboard opens)
+            }}
+          >
           {/* Amount Card */}
           <View style={[styles.amountCard, { borderColor: accentColor + "88" }]}>
             <Text style={[styles.amountHint, { color: accentColor }]}>
@@ -139,6 +167,20 @@ export default function AddTransactionScreen() {
                 Rs. {parseFloat(amount).toLocaleString("en-NP")}
               </Text>
             )}
+            {/* Quick Amount Buttons */}
+            <View style={styles.quickAmounts}>
+              {QUICK_AMOUNTS.map((amt) => (
+                <TouchableOpacity
+                  key={amt}
+                  style={[styles.quickAmtBtn, amount === amt.toString() && { backgroundColor: accentColor + "33", borderColor: accentColor }]}
+                  onPress={() => handleQuickAmount(amt)}
+                >
+                  <Text style={[styles.quickAmtText, { color: amount === amt.toString() ? accentColor : COLORS.darkTextSecondary }]}>
+                    Rs.{amt}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
 
           {/* Category */}
@@ -171,6 +213,12 @@ export default function AddTransactionScreen() {
               maxLength={120}
               multiline
               numberOfLines={2}
+              onFocus={() => {
+                // Scroll to make note input visible when keyboard opens
+                setTimeout(() => {
+                  scrollViewRef.current?.scrollTo({ y: 280, animated: true });
+                }, 100);
+              }}
             />
           </View>
 
@@ -194,10 +242,11 @@ export default function AddTransactionScreen() {
               ))}
             </View>
           </View>
-        </ScrollView>
+          </ScrollView>
+        </TouchableWithoutFeedback>
 
-        {/* Fixed Save Button */}
-        <View style={[styles.footer, { paddingBottom: Math.max(bottomPadding, 16) }]}>
+        {/* Fixed Save Button - Made Bigger */}
+        <View style={[styles.footer, { paddingBottom: Math.max(bottomPadding, 20) }]}>
           <TouchableOpacity
             style={[styles.saveBtn, saving && { opacity: 0.65 }]}
             onPress={handleSave}
@@ -216,7 +265,7 @@ export default function AddTransactionScreen() {
                 <>
                   <Feather
                     name={isExpense ? "arrow-down-circle" : "arrow-up-circle"}
-                    size={22}
+                    size={28}
                     color={COLORS.white}
                   />
                   <Text style={styles.saveBtnText}>
@@ -232,13 +281,18 @@ export default function AddTransactionScreen() {
   );
 }
 
+// Responsive sizing based on screen dimensions
+const isSmallScreen = SCREEN_WIDTH < 360;
+const responsivePadding = isSmallScreen ? 14 : 18;
+const responsiveFontSize = isSmallScreen ? 40 : 48;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#060D1F" },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 18,
+    paddingHorizontal: responsivePadding,
     paddingBottom: 12,
   },
   closeBtn: {
@@ -254,7 +308,7 @@ const styles = StyleSheet.create({
   title: { color: COLORS.white, fontSize: 18, fontFamily: "Inter_700Bold" },
   typeToggle: {
     flexDirection: "row",
-    marginHorizontal: 18,
+    marginHorizontal: responsivePadding,
     marginBottom: 16,
     backgroundColor: COLORS.darkCard,
     borderRadius: 16,
@@ -269,29 +323,48 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    paddingVertical: 13,
+    paddingVertical: 14,
     borderRadius: 12,
   },
   typeBtnText: { fontSize: 15, fontFamily: "Inter_700Bold" },
-  scrollContent: { paddingHorizontal: 18, gap: 20, paddingTop: 4 },
+  scrollContent: { paddingHorizontal: responsivePadding, gap: 20, paddingTop: 4 },
   amountCard: {
     backgroundColor: "rgba(255,255,255,0.04)",
     borderRadius: 22,
-    padding: 22,
+    padding: isSmallScreen ? 16 : 22,
     borderWidth: 2,
-    gap: 8,
+    gap: 10,
   },
   amountHint: { fontSize: 11, fontFamily: "Inter_700Bold", letterSpacing: 1 },
   amountRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  amountRs: { fontSize: 28, fontFamily: "Inter_700Bold" },
+  amountRs: { fontSize: isSmallScreen ? 24 : 28, fontFamily: "Inter_700Bold" },
   amountInput: {
     flex: 1,
-    fontSize: 48,
+    fontSize: responsiveFontSize,
     fontFamily: "Inter_700Bold",
     minWidth: 60,
     padding: 0,
+    width: "100%",
   },
   amountWords: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  quickAmounts: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 8,
+    flexWrap: "wrap",
+  },
+  quickAmtBtn: {
+    paddingHorizontal: isSmallScreen ? 10 : 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: COLORS.darkCard,
+    borderWidth: 1,
+    borderColor: COLORS.darkBorder,
+  },
+  quickAmtText: {
+    fontSize: isSmallScreen ? 11 : 12,
+    fontFamily: "Inter_600SemiBold",
+  },
   block: { gap: 10 },
   blockHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
   blockLabel: {
@@ -310,12 +383,14 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
-    minHeight: 56,
+    minHeight: isSmallScreen ? 60 : 70,
+    maxHeight: 120,
     textAlignVertical: "top",
+    width: "100%",
   },
   recurringRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   pill: {
-    paddingHorizontal: 16,
+    paddingHorizontal: isSmallScreen ? 12 : 16,
     paddingVertical: 10,
     borderRadius: 22,
     backgroundColor: COLORS.darkCard,
@@ -324,24 +399,33 @@ const styles = StyleSheet.create({
   },
   pillText: { color: COLORS.darkTextSecondary, fontSize: 13, fontFamily: "Inter_500Medium" },
   footer: {
-    paddingHorizontal: 18,
-    paddingTop: 14,
-    backgroundColor: "rgba(6,13,31,0.95)",
+    paddingHorizontal: responsivePadding,
+    paddingTop: 16,
+    backgroundColor: "rgba(6,13,31,0.98)",
     borderTopWidth: 1,
     borderTopColor: COLORS.darkBorder,
   },
-  saveBtn: { borderRadius: 20, overflow: "hidden" },
+  saveBtn: { 
+    borderRadius: 24, 
+    overflow: "hidden",
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
   saveBtnInner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
-    paddingVertical: 20,
+    gap: 14,
+    paddingVertical: 22,
+    minHeight: 64,
   },
   saveBtnText: {
     color: COLORS.white,
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: "Inter_700Bold",
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
 });

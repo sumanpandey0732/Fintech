@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Alert,
   Dimensions,
@@ -10,6 +10,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ActivityIndicator,
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,7 +19,7 @@ import { GradientBackground } from "@/components/GradientBackground";
 import { TransactionItem } from "@/components/TransactionItem";
 import COLORS from "@/constants/colors";
 import { CATEGORY_CONFIG, formatAmount } from "@/constants/categories";
-import { useApp } from "@/context/AppContext";
+import { useApp, Transaction } from "@/context/AppContext";
 
 const { width: SW } = Dimensions.get("window");
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -41,43 +42,78 @@ function getDateRange(period: Period): { from: Date; to: Date } {
 
 export default function AnalyticsScreen() {
   const insets = useSafeAreaInsets();
-  const { transactions, deleteTransaction } = useApp();
+  const { transactions, deleteTransaction, isLoading } = useApp();
   const [period, setPeriod] = useState<Period>("month");
   const [activeFilter, setActiveFilter] = useState<"all" | "income" | "expense">("all");
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 16;
 
-  const { from, to } = getDateRange(period);
+  // Memoize calculations to prevent re-renders
+  const { from, to } = useMemo(() => getDateRange(period), [period]);
 
-  const periodTx = transactions.filter((t) => {
-    const d = new Date(t.date);
-    return d >= from && d <= to;
-  });
+  const periodTx = useMemo(() => {
+    if (!transactions || !Array.isArray(transactions)) return [];
+    return transactions.filter((t) => {
+      if (!t || !t.date) return false;
+      try {
+        const d = new Date(t.date);
+        return d >= from && d <= to;
+      } catch {
+        return false;
+      }
+    });
+  }, [transactions, from, to]);
 
-  const income = periodTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const expenses = periodTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const savings = income - expenses;
-  const savingsRate = income > 0 ? ((savings / income) * 100).toFixed(0) : "0";
+  const { income, expenses, savings, savingsRate } = useMemo(() => {
+    const inc = periodTx.filter((t) => t?.type === "income").reduce((s, t) => s + (t?.amount || 0), 0);
+    const exp = periodTx.filter((t) => t?.type === "expense").reduce((s, t) => s + (t?.amount || 0), 0);
+    const sav = inc - exp;
+    const rate = inc > 0 ? ((sav / inc) * 100).toFixed(0) : "0";
+    return { income: inc, expenses: exp, savings: sav, savingsRate: rate };
+  }, [periodTx]);
 
-  const categorySpending: Record<string, number> = {};
-  periodTx.filter((t) => t.type === "expense").forEach((t) => {
-    categorySpending[t.category] = (categorySpending[t.category] ?? 0) + t.amount;
-  });
-  const topCategories = Object.entries(categorySpending).sort(([, a], [, b]) => b - a).slice(0, 6);
-  const totalSpent = Object.values(categorySpending).reduce((s, v) => s + v, 0);
+  const { topCategories, totalSpent } = useMemo(() => {
+    const categorySpending: Record<string, number> = {};
+    periodTx.filter((t) => t?.type === "expense").forEach((t) => {
+      if (t?.category) {
+        categorySpending[t.category] = (categorySpending[t.category] ?? 0) + (t?.amount || 0);
+      }
+    });
+    const sorted = Object.entries(categorySpending).sort(([, a], [, b]) => b - a).slice(0, 6);
+    const total = Object.values(categorySpending).reduce((s, v) => s + v, 0);
+    return { topCategories: sorted, totalSpent: total };
+  }, [periodTx]);
 
-  const filteredTx = periodTx.filter((t) => {
-    if (activeFilter === "all") return true;
-    return t.type === activeFilter;
-  });
+  const filteredTx = useMemo(() => {
+    return periodTx.filter((t) => {
+      if (activeFilter === "all") return true;
+      return t?.type === activeFilter;
+    });
+  }, [periodTx, activeFilter]);
 
-  const monthlyData = getLast6MonthsData(transactions);
+  const monthlyData = useMemo(() => {
+    if (!transactions || !Array.isArray(transactions)) return [];
+    return getLast6MonthsData(transactions);
+  }, [transactions]);
 
   const handleDelete = (id: string) => {
+    if (!id) return;
     Alert.alert("Delete Transaction", "Are you sure you want to delete this transaction?", [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: () => deleteTransaction(id) },
     ]);
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <GradientBackground colors={["#060D1F", "#0A1628", "#0D1B4B"]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primaryLight} />
+          <Text style={styles.loadingText}>Loading analytics...</Text>
+        </View>
+      </GradientBackground>
+    );
+  }
 
   return (
     <GradientBackground colors={["#060D1F", "#0A1628", "#0D1B4B"]}>
@@ -167,7 +203,7 @@ export default function AnalyticsScreen() {
             <Text style={styles.sectionTitle}>Spending Breakdown</Text>
             <View style={styles.card}>
               {topCategories.map(([cat, amount], idx) => {
-                const config = CATEGORY_CONFIG[cat as any];
+                const config = CATEGORY_CONFIG[cat as keyof typeof CATEGORY_CONFIG];
                 if (!config) return null;
                 const pct = totalSpent > 0 ? (amount / totalSpent) * 100 : 0;
                 const color = PIE_COLORS[idx % PIE_COLORS.length];
@@ -182,7 +218,7 @@ export default function AnalyticsScreen() {
                         <Text style={styles.catAmount}>{formatAmount(amount)}</Text>
                       </View>
                       <View style={styles.progressTrack}>
-                        <View style={[styles.progressFill, { width: `${Math.min(pct, 100)}%` as any, backgroundColor: color }]} />
+                        <View style={[styles.progressFill, { width: `${Math.min(pct, 100)}%`, backgroundColor: color }]} />
                       </View>
                       <Text style={styles.catPct}>{pct.toFixed(0)}% of total</Text>
                     </View>
@@ -237,6 +273,16 @@ export default function AnalyticsScreen() {
 }
 
 function PieChart({ categories, total }: { categories: [string, number][]; total: number }) {
+  // Safety checks
+  if (!categories || categories.length === 0 || total <= 0) {
+    return (
+      <View style={pieStyles.emptyContainer}>
+        <Feather name="pie-chart" size={36} color={COLORS.darkBorder} />
+        <Text style={pieStyles.emptyText}>No data to display</Text>
+      </View>
+    );
+  }
+
   const SIZE = Math.min(SW - 80, 200);
   const R = SIZE / 2;
   const INNER_R = R * 0.52;
@@ -244,8 +290,8 @@ function PieChart({ categories, total }: { categories: [string, number][]; total
   let cumAngle = -Math.PI / 2;
 
   const slices = categories.map(([cat, amount], idx) => {
-    const pct = amount / total;
-    const angle = pct * Math.PI * 2 - GAP;
+    const pct = total > 0 ? amount / total : 0;
+    const angle = Math.max(pct * Math.PI * 2 - GAP, 0.01); // Minimum angle to prevent rendering issues
     const startAngle = cumAngle + GAP / 2;
     cumAngle += pct * Math.PI * 2;
     const x1 = R + R * Math.cos(startAngle);
@@ -258,9 +304,28 @@ function PieChart({ categories, total }: { categories: [string, number][]; total
     const iy2 = R + INNER_R * Math.sin(startAngle);
     const large = angle > Math.PI ? 1 : 0;
     const color = PIE_COLORS[idx % PIE_COLORS.length];
-    const config = CATEGORY_CONFIG[cat as any];
-    return { d: `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${INNER_R} ${INNER_R} 0 ${large} 0 ${ix2} ${iy2} Z`, color, config, pct, amount };
-  });
+    const config = CATEGORY_CONFIG[cat as keyof typeof CATEGORY_CONFIG];
+    
+    // Validate path data
+    const pathData = `M ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${INNER_R} ${INNER_R} 0 ${large} 0 ${ix2} ${iy2} Z`;
+    
+    return { 
+      d: pathData, 
+      color, 
+      config, 
+      pct, 
+      amount,
+      isValid: !isNaN(x1) && !isNaN(y1) && !isNaN(x2) && !isNaN(y2)
+    };
+  }).filter(s => s.isValid);
+
+  if (slices.length === 0) {
+    return (
+      <View style={pieStyles.emptyContainer}>
+        <Text style={pieStyles.emptyText}>Unable to render chart</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={pieStyles.container}>
@@ -300,34 +365,63 @@ const pieStyles = StyleSheet.create({
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   legendText: { color: COLORS.darkText, fontSize: 12, fontFamily: "Inter_500Medium", flex: 1 },
   legendPct: { color: COLORS.darkTextSecondary, fontSize: 11, fontFamily: "Inter_600SemiBold" },
+  emptyContainer: { alignItems: "center", padding: 32, gap: 10 },
+  emptyText: { color: COLORS.darkTextSecondary, fontSize: 14, fontFamily: "Inter_400Regular" },
 });
 
-function getLast6MonthsData(transactions: any[]) {
+function getLast6MonthsData(transactions: Transaction[]) {
+  if (!transactions || !Array.isArray(transactions)) return [];
+  
   const now = new Date();
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
     const income = transactions
-      .filter((t) => { const td = new Date(t.date); return t.type === "income" && td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear(); })
-      .reduce((s, t) => s + t.amount, 0);
+      .filter((t) => {
+        if (!t || !t.date || t.type !== "income") return false;
+        try {
+          const td = new Date(t.date);
+          return td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear();
+        } catch {
+          return false;
+        }
+      })
+      .reduce((s, t) => s + (t?.amount || 0), 0);
     const expense = transactions
-      .filter((t) => { const td = new Date(t.date); return t.type === "expense" && td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear(); })
-      .reduce((s, t) => s + t.amount, 0);
+      .filter((t) => {
+        if (!t || !t.date || t.type !== "expense") return false;
+        try {
+          const td = new Date(t.date);
+          return td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear();
+        } catch {
+          return false;
+        }
+      })
+      .reduce((s, t) => s + (t?.amount || 0), 0);
     return { month: MONTHS[d.getMonth()], income, expense };
   });
 }
 
 function BarChart({ data }: { data: { month: string; income: number; expense: number }[] }) {
-  const max = Math.max(...data.flatMap((d) => [d.income, d.expense]), 1);
+  if (!data || data.length === 0) {
+    return (
+      <View style={bcStyles.emptyContainer}>
+        <Text style={bcStyles.emptyText}>No data available</Text>
+      </View>
+    );
+  }
+
+  const max = Math.max(...data.flatMap((d) => [d?.income || 0, d?.expense || 0]), 1);
   const BAR_H = 100;
+  
   return (
     <View style={bcStyles.container}>
       {data.map((d, i) => (
         <View key={i} style={bcStyles.group}>
           <View style={[bcStyles.barGroup, { height: BAR_H }]}>
-            <View style={[bcStyles.bar, { height: Math.max((d.income / max) * BAR_H, 4), backgroundColor: COLORS.success }]} />
-            <View style={[bcStyles.bar, { height: Math.max((d.expense / max) * BAR_H, 4), backgroundColor: COLORS.error }]} />
+            <View style={[bcStyles.bar, { height: Math.max(((d?.income || 0) / max) * BAR_H, 4), backgroundColor: COLORS.success }]} />
+            <View style={[bcStyles.bar, { height: Math.max(((d?.expense || 0) / max) * BAR_H, 4), backgroundColor: COLORS.error }]} />
           </View>
-          <Text style={bcStyles.label}>{d.month}</Text>
+          <Text style={bcStyles.label}>{d?.month || ""}</Text>
         </View>
       ))}
     </View>
@@ -340,6 +434,8 @@ const bcStyles = StyleSheet.create({
   barGroup: { flexDirection: "row", alignItems: "flex-end", gap: 3, justifyContent: "center" },
   bar: { width: 10, borderRadius: 4 },
   label: { color: COLORS.darkTextSecondary, fontSize: 11, fontFamily: "Inter_400Regular" },
+  emptyContainer: { alignItems: "center", padding: 20 },
+  emptyText: { color: COLORS.darkTextSecondary, fontSize: 14 },
 });
 
 const styles = StyleSheet.create({
@@ -384,4 +480,6 @@ const styles = StyleSheet.create({
   emptySubText: { color: COLORS.darkBorder, fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", paddingHorizontal: 24 },
   emptyChart: { alignItems: "center", paddingVertical: 32, gap: 10, backgroundColor: COLORS.darkCard, borderRadius: 20, borderWidth: 1, borderColor: COLORS.darkBorder },
   emptyChartText: { color: COLORS.darkTextSecondary, fontSize: 14, fontFamily: "Inter_400Regular" },
+  loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },
+  loadingText: { color: COLORS.darkTextSecondary, fontSize: 16, fontFamily: "Inter_500Medium" },
 });

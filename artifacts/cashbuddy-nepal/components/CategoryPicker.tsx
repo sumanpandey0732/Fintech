@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
 import {
-  FlatList,
+  Dimensions,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,6 +10,11 @@ import {
 import { CATEGORY_CONFIG, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
 import COLORS from "@/constants/colors";
 import { TransactionCategory, TransactionType } from "@/context/AppContext";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const isSmallScreen = SCREEN_WIDTH < 360;
+const numColumns = isSmallScreen ? 2 : 3;
+const chipWidth = (SCREEN_WIDTH - 36 - (numColumns - 1) * 10) / numColumns; // 36 = padding (18*2)
 
 interface Props {
   selected: TransactionCategory | null;
@@ -22,7 +27,6 @@ export function CategoryPicker({ selected, type, onSelect }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Category</Text>
       <View style={styles.grid}>
         {categories.map((cat) => {
           const config = CATEGORY_CONFIG[cat];
@@ -45,7 +49,7 @@ export function CategoryPicker({ selected, type, onSelect }: Props) {
               >
                 <Feather
                   name={config.icon as any}
-                  size={16}
+                  size={isSmallScreen ? 14 : 16}
                   color={isSelected ? COLORS.white : config.color}
                 />
               </View>
@@ -54,6 +58,7 @@ export function CategoryPicker({ selected, type, onSelect }: Props) {
                   styles.chipText,
                   { color: isSelected ? config.color : COLORS.darkTextSecondary },
                 ]}
+                numberOfLines={1}
               >
                 {config.label}
               </Text>
@@ -69,13 +74,6 @@ const styles = StyleSheet.create({
   container: {
     gap: 12,
   },
-  label: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -84,23 +82,26 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: isSmallScreen ? 10 : 14,
+    paddingVertical: isSmallScreen ? 8 : 10,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
     backgroundColor: COLORS.darkCard,
-    gap: 8,
+    gap: isSmallScreen ? 6 : 8,
+    minWidth: isSmallScreen ? 90 : 100,
+    maxWidth: chipWidth,
   },
   iconWrap: {
-    width: 28,
-    height: 28,
+    width: isSmallScreen ? 24 : 28,
+    height: isSmallScreen ? 24 : 28,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
   chipText: {
-    fontSize: 13,
+    fontSize: isSmallScreen ? 11 : 13,
     fontFamily: "Inter_500Medium",
+    flex: 1,
   },
 });

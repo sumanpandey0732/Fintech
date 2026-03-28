@@ -5,7 +5,6 @@ import { router } from "expo-router";
 import React, { useRef, useState } from "react";
 import {
   Alert,
-  Dimensions,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,20 +17,15 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import COLORS from "@/constants/colors";
-import {
-  TransactionCategory,
-  TransactionType,
-  useApp,
-} from "@/context/AppContext";
-
-const { height: SH } = Dimensions.get("window");
-const COMPACT = SH < 700;
+import { TransactionCategory, TransactionType, useApp } from "@/context/AppContext";
+import { sendTransactionConfirmation } from "@/utils/notifications";
 
 const RECURRING_OPTIONS = ["none", "daily", "weekly", "monthly"] as const;
 
 export default function AddTransactionScreen() {
   const insets = useSafeAreaInsets();
   const { addTransaction } = useApp();
+
   const [type, setType] = useState<TransactionType>("expense");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState<TransactionCategory | null>(null);
@@ -41,7 +35,9 @@ export default function AddTransactionScreen() {
   const noteRef = useRef<TextInput>(null);
 
   const topPadding = Platform.OS === "web" ? 52 : insets.top + 8;
-  const bottomPadding = Platform.OS === "web" ? 20 : insets.bottom;
+  const bottomPadding = insets.bottom;
+  const isExpense = type === "expense";
+  const accentColor = isExpense ? COLORS.error : COLORS.success;
 
   const handleSave = async () => {
     const parsed = parseFloat(amount.replace(/,/g, ""));
@@ -67,79 +63,90 @@ export default function AddTransactionScreen() {
       recurring,
     });
 
+    await sendTransactionConfirmation(type, parsed, category);
+
     setSaving(false);
     router.back();
   };
 
-  const isExpense = type === "expense";
-
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={["#060D1F", "#0A1628"]} style={StyleSheet.absoluteFill} />
+    <View style={styles.root}>
+      <LinearGradient colors={["#060D1F", "#0A1628", "#0D1B4B"]} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPadding }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
-          <Feather name="x" size={20} color={COLORS.white} />
+          <Feather name="x" size={22} color={COLORS.white} />
         </TouchableOpacity>
         <Text style={styles.title}>Add Transaction</Text>
-        <View style={{ width: 38 }} />
+        <View style={{ width: 44 }} />
       </View>
 
       {/* Type Toggle */}
       <View style={styles.typeToggle}>
         <TouchableOpacity
-          style={[styles.typeBtn, isExpense && styles.typeBtnExpense]}
+          style={[styles.typeBtn, isExpense && { backgroundColor: COLORS.error }]}
           onPress={() => { setType("expense"); setCategory(null); Haptics.selectionAsync(); }}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
-          <Feather name="arrow-down-circle" size={15} color={isExpense ? COLORS.white : COLORS.darkTextSecondary} />
-          <Text style={[styles.typeBtnText, isExpense && { color: COLORS.white }]}>Expense</Text>
+          <Feather name="arrow-down-circle" size={18} color={isExpense ? COLORS.white : COLORS.darkTextSecondary} />
+          <Text style={[styles.typeBtnText, { color: isExpense ? COLORS.white : COLORS.darkTextSecondary }]}>Expense</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.typeBtn, !isExpense && styles.typeBtnIncome]}
+          style={[styles.typeBtn, !isExpense && { backgroundColor: COLORS.success }]}
           onPress={() => { setType("income"); setCategory(null); Haptics.selectionAsync(); }}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
-          <Feather name="arrow-up-circle" size={15} color={!isExpense ? COLORS.white : COLORS.darkTextSecondary} />
-          <Text style={[styles.typeBtnText, !isExpense && { color: COLORS.white }]}>Income</Text>
+          <Feather name="arrow-up-circle" size={18} color={!isExpense ? COLORS.white : COLORS.darkTextSecondary} />
+          <Text style={[styles.typeBtnText, { color: !isExpense ? COLORS.white : COLORS.darkTextSecondary }]}>Income</Text>
         </TouchableOpacity>
       </View>
 
+      {/* Keyboard-aware form */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
         <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPadding + 90 }]}
+          style={{ flex: 1 }}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPadding + 100 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           bounces={false}
         >
-          {/* Amount */}
-          <View style={[styles.amountCard, { borderColor: isExpense ? COLORS.error + "66" : COLORS.success + "66" }]}>
-            <Text style={styles.amountHint}>Amount (Rs.)</Text>
+          {/* Amount Card */}
+          <View style={[styles.amountCard, { borderColor: accentColor + "88" }]}>
+            <Text style={[styles.amountHint, { color: accentColor }]}>
+              {isExpense ? "💸 EXPENSE AMOUNT" : "💚 INCOME AMOUNT"}
+            </Text>
             <View style={styles.amountRow}>
-              <Text style={[styles.amountRs, { color: isExpense ? COLORS.error : COLORS.success }]}>Rs.</Text>
+              <Text style={[styles.amountRs, { color: accentColor }]}>Rs.</Text>
               <TextInput
-                style={[styles.amountInput, { color: isExpense ? COLORS.error : COLORS.success }]}
+                style={[styles.amountInput, { color: accentColor }]}
                 value={amount}
                 onChangeText={(v) => setAmount(v.replace(/[^0-9.]/g, ""))}
                 keyboardType="decimal-pad"
-                placeholder="0"
+                placeholder="0.00"
                 placeholderTextColor={COLORS.darkBorder}
                 autoFocus
                 returnKeyType="next"
                 onSubmitEditing={() => noteRef.current?.focus()}
               />
             </View>
+            {amount !== "" && !isNaN(parseFloat(amount)) && (
+              <Text style={[styles.amountWords, { color: accentColor + "AA" }]}>
+                Rs. {parseFloat(amount).toLocaleString("en-NP")}
+              </Text>
+            )}
           </View>
 
           {/* Category */}
-          <View style={styles.sectionBlock}>
-            <Text style={styles.sectionLabel}>Category</Text>
+          <View style={styles.block}>
+            <View style={styles.blockHeader}>
+              <Feather name="grid" size={14} color={COLORS.primaryLight} />
+              <Text style={styles.blockLabel}>CATEGORY</Text>
+            </View>
             <CategoryPicker
               selected={category}
               type={type}
@@ -148,63 +155,75 @@ export default function AddTransactionScreen() {
           </View>
 
           {/* Note */}
-          <View style={styles.sectionBlock}>
-            <Text style={styles.sectionLabel}>Note (optional)</Text>
+          <View style={styles.block}>
+            <View style={styles.blockHeader}>
+              <Feather name="edit-3" size={14} color={COLORS.primaryLight} />
+              <Text style={styles.blockLabel}>NOTE (OPTIONAL)</Text>
+            </View>
             <TextInput
               ref={noteRef}
               style={styles.noteInput}
               value={note}
               onChangeText={setNote}
-              placeholder="What was it for?"
+              placeholder="What was this for?"
               placeholderTextColor={COLORS.darkTextSecondary}
               returnKeyType="done"
-              maxLength={100}
+              maxLength={120}
+              multiline
+              numberOfLines={2}
             />
           </View>
 
-          {/* Recurring — compact pills */}
-          {!COMPACT && (
-            <View style={styles.sectionBlock}>
-              <Text style={styles.sectionLabel}>Recurring</Text>
-              <View style={styles.recurringRow}>
-                {RECURRING_OPTIONS.map((opt) => (
-                  <TouchableOpacity
-                    key={opt}
-                    style={[styles.pill, recurring === opt && styles.pillActive]}
-                    onPress={() => { setRecurring(opt); Haptics.selectionAsync(); }}
-                  >
-                    <Text style={[styles.pillText, recurring === opt && styles.pillTextActive]}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+          {/* Recurring */}
+          <View style={styles.block}>
+            <View style={styles.blockHeader}>
+              <Feather name="repeat" size={14} color={COLORS.primaryLight} />
+              <Text style={styles.blockLabel}>RECURRING</Text>
             </View>
-          )}
+            <View style={styles.recurringRow}>
+              {RECURRING_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt}
+                  style={[styles.pill, recurring === opt && { backgroundColor: COLORS.primary, borderColor: COLORS.primaryLight }]}
+                  onPress={() => { setRecurring(opt); Haptics.selectionAsync(); }}
+                >
+                  <Text style={[styles.pillText, recurring === opt && { color: COLORS.white }]}>
+                    {opt === "none" ? "One-time" : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
         </ScrollView>
 
-        {/* Save Button — pinned at bottom */}
-        <View style={[styles.footer, { paddingBottom: bottomPadding + 12 }]}>
+        {/* Fixed Save Button */}
+        <View style={[styles.footer, { paddingBottom: Math.max(bottomPadding, 16) }]}>
           <TouchableOpacity
-            style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+            style={[styles.saveBtn, saving && { opacity: 0.65 }]}
             onPress={handleSave}
             disabled={saving}
             activeOpacity={0.85}
           >
             <LinearGradient
-              colors={isExpense ? ["#C62828", "#FF1744"] : ["#00897B", "#00C853"]}
+              colors={isExpense ? ["#B71C1C", "#EF5350"] : ["#1B5E20", "#43A047"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.saveBtnGrad}
+              style={styles.saveBtnInner}
             >
-              <Feather
-                name={isExpense ? "arrow-down-circle" : "arrow-up-circle"}
-                size={20}
-                color={COLORS.white}
-              />
-              <Text style={styles.saveBtnText}>
-                {saving ? "Saving..." : `Save ${isExpense ? "Expense" : "Income"}`}
-              </Text>
+              {saving ? (
+                <Text style={styles.saveBtnText}>Saving...</Text>
+              ) : (
+                <>
+                  <Feather
+                    name={isExpense ? "arrow-down-circle" : "arrow-up-circle"}
+                    size={22}
+                    color={COLORS.white}
+                  />
+                  <Text style={styles.saveBtnText}>
+                    Save {isExpense ? "Expense" : "Income"}
+                  </Text>
+                </>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -214,37 +233,33 @@ export default function AddTransactionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.darkBg },
+  root: { flex: 1, backgroundColor: "#060D1F" },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingBottom: 10,
+    paddingBottom: 12,
   },
   closeBtn: {
-    width: 38,
-    height: 38,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.glassWhite,
-    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    borderColor: "rgba(255,255,255,0.12)",
   },
-  title: {
-    color: COLORS.white,
-    fontSize: 17,
-    fontFamily: "Inter_700Bold",
-  },
+  title: { color: COLORS.white, fontSize: 18, fontFamily: "Inter_700Bold" },
   typeToggle: {
     flexDirection: "row",
     marginHorizontal: 18,
-    marginBottom: 14,
+    marginBottom: 16,
     backgroundColor: COLORS.darkCard,
-    borderRadius: 14,
-    padding: 4,
-    gap: 4,
+    borderRadius: 16,
+    padding: 5,
+    gap: 5,
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
   },
@@ -253,59 +268,37 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 11,
+    gap: 8,
+    paddingVertical: 13,
+    borderRadius: 12,
   },
-  typeBtnExpense: { backgroundColor: COLORS.error },
-  typeBtnIncome: { backgroundColor: COLORS.success },
-  typeBtnText: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
-  scroll: { flex: 1 },
-  scrollContent: {
-    paddingHorizontal: 18,
-    gap: 18,
-    paddingTop: 4,
-  },
+  typeBtnText: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  scrollContent: { paddingHorizontal: 18, gap: 20, paddingTop: 4 },
   amountCard: {
-    backgroundColor: COLORS.darkCard,
-    borderRadius: 18,
-    padding: 18,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 22,
+    padding: 22,
     borderWidth: 2,
-    gap: 6,
+    gap: 8,
   },
-  amountHint: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  amountRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  amountRs: {
-    fontSize: 26,
-    fontFamily: "Inter_600SemiBold",
-  },
+  amountHint: { fontSize: 11, fontFamily: "Inter_700Bold", letterSpacing: 1 },
+  amountRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  amountRs: { fontSize: 28, fontFamily: "Inter_700Bold" },
   amountInput: {
     flex: 1,
-    fontSize: COMPACT ? 36 : 44,
+    fontSize: 48,
     fontFamily: "Inter_700Bold",
     minWidth: 60,
+    padding: 0,
   },
-  sectionBlock: { gap: 8 },
-  sectionLabel: {
+  amountWords: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  block: { gap: 10 },
+  blockHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
+  blockLabel: {
     color: COLORS.darkTextSecondary,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1,
   },
   noteInput: {
     backgroundColor: COLORS.darkCard,
@@ -317,49 +310,38 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
-    height: 52,
+    minHeight: 56,
+    textAlignVertical: "top",
   },
-  recurringRow: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
-  },
+  recurringRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 22,
     backgroundColor: COLORS.darkCard,
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
   },
-  pillActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primaryLight,
-  },
-  pillText: {
-    color: COLORS.darkTextSecondary,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
-  pillTextActive: { color: COLORS.white },
+  pillText: { color: COLORS.darkTextSecondary, fontSize: 13, fontFamily: "Inter_500Medium" },
   footer: {
     paddingHorizontal: 18,
-    paddingTop: 12,
+    paddingTop: 14,
+    backgroundColor: "rgba(6,13,31,0.95)",
     borderTopWidth: 1,
     borderTopColor: COLORS.darkBorder,
-    backgroundColor: COLORS.darkBg,
   },
-  saveBtn: { borderRadius: 18, overflow: "hidden" },
-  saveBtnGrad: {
+  saveBtn: { borderRadius: 20, overflow: "hidden" },
+  saveBtnInner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
-    paddingVertical: COMPACT ? 14 : 17,
+    gap: 12,
+    paddingVertical: 20,
   },
   saveBtnText: {
     color: COLORS.white,
-    fontSize: 17,
+    fontSize: 18,
     fontFamily: "Inter_700Bold",
+    letterSpacing: 0.3,
   },
 });

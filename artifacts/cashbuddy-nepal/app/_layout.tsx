@@ -14,20 +14,47 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider, useApp } from "@/context/AppContext";
-import { scheduleDailyBalanceNotification } from "@/utils/notifications";
+import { CATEGORY_CONFIG } from "@/constants/categories";
+import { scheduleAllNotifications } from "@/utils/notifications";
 
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
 function NotificationSetup() {
-  const { profile, getBalance } = useApp();
+  const { profile, getBalance, getMonthlyExpenses, transactions, budgets } = useApp();
 
   useEffect(() => {
-    if (profile.isOnboarded && profile.name) {
-      scheduleDailyBalanceNotification(getBalance(), profile.name);
-    }
-  }, [profile.isOnboarded, profile.name]);
+    if (!profile.isOnboarded || !profile.name) return;
+
+    const balance = getBalance();
+    const monthlyExpenses = getMonthlyExpenses();
+
+    const now = new Date();
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const weeklyExpenses = transactions
+      .filter((t) => t.type === "expense" && new Date(t.date) >= sevenDaysAgo)
+      .reduce((s, t) => s + t.amount, 0);
+
+    const budgetAlerts = budgets
+      .filter((b) => b.limit > 0 && b.spent / b.limit >= 0.8)
+      .map((b) => ({
+        category: CATEGORY_CONFIG[b.category]?.label ?? b.category,
+        percent: Math.round((b.spent / b.limit) * 100),
+      }));
+
+    scheduleAllNotifications({
+      balance,
+      name: profile.name,
+      todayExpenses: transactions
+        .filter((t) => t.type === "expense" && t.date.slice(0, 10) === now.toISOString().slice(0, 10))
+        .reduce((s, t) => s + t.amount, 0),
+      weeklyExpenses,
+      streak: profile.streak,
+      budgetAlerts,
+    });
+  }, [profile.isOnboarded, profile.name, profile.streak, transactions.length, budgets.length]);
 
   return null;
 }

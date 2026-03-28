@@ -16,17 +16,146 @@ import {
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BalanceCard } from "@/components/BalanceCard";
+import { BudgetRingsRow } from "@/components/BudgetRingsRow";
 import { GradientBackground } from "@/components/GradientBackground";
+import { SmartInsightCard } from "@/components/SmartInsightCard";
 import { TransactionItem } from "@/components/TransactionItem";
+import { WeeklyHeatmap } from "@/components/WeeklyHeatmap";
 import COLORS from "@/constants/colors";
 import { CATEGORY_CONFIG, formatAmount } from "@/constants/categories";
 import { useApp } from "@/context/AppContext";
 
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 function getGreeting() {
   const h = new Date().getHours();
+  if (h < 5) return "Late night";
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
-  return "Good evening";
+  if (h < 21) return "Good evening";
+  return "Good night";
+}
+
+function buildHeatmapData(transactions: any[]) {
+  const now = new Date();
+  const result: { label: string; amount: number }[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    const total = transactions
+      .filter((t) => t.type === "expense" && t.date.slice(0, 10) === key)
+      .reduce((s: number, t: any) => s + t.amount, 0);
+    result.push({ label: DAYS[(d.getDay() + 6) % 7], amount: Math.round(total) });
+  }
+  return result;
+}
+
+function buildInsights(opts: {
+  balance: number;
+  income: number;
+  expenses: number;
+  savingsRate: number;
+  topCategory: [string, number] | undefined;
+  streak: number;
+  transactions: any[];
+}) {
+  const insights = [];
+  const { balance, income, expenses, savingsRate, topCategory, streak, transactions } = opts;
+
+  if (savingsRate >= 30) {
+    insights.push({
+      icon: "🏆",
+      color: "#FFD700",
+      gradient: ["#1A2A0A", "#2E5916"] as [string, string],
+      title: "Excellent Savings Rate!",
+      body: `You're saving ${savingsRate.toFixed(0)}% of your income. That puts you in the top tier of savers!`,
+    });
+  } else if (savingsRate > 0) {
+    insights.push({
+      icon: "💡",
+      color: "#FFA726",
+      gradient: ["#1A1200", "#3E2800"] as [string, string],
+      title: "Boost Your Savings",
+      body: `Current savings rate: ${savingsRate.toFixed(0)}%. Aim for 20%+ by reducing your top spending category.`,
+    });
+  }
+
+  if (topCategory) {
+    const cfg = CATEGORY_CONFIG[topCategory[0] as any];
+    insights.push({
+      icon: cfg?.icon ?? "💸",
+      color: "#1565C0",
+      gradient: ["#0D1B4B", "#1A2A6C"] as [string, string],
+      title: `Top Spend: ${cfg?.label ?? topCategory[0]}`,
+      body: `You spent Rs. ${topCategory[1].toLocaleString("en-NP")} on ${cfg?.label ?? topCategory[0]} this month. Consider setting a budget limit.`,
+    });
+  }
+
+  if (streak >= 7) {
+    insights.push({
+      icon: "🔥",
+      color: "#FF5722",
+      gradient: ["#1A0800", "#3E1500"] as [string, string],
+      title: `${streak}-Day Streak! Amazing!`,
+      body: "You've been tracking every day! Consistency is the key to financial freedom.",
+    });
+  } else if (streak >= 3) {
+    insights.push({
+      icon: "⚡",
+      color: COLORS.accent,
+      gradient: ["#0D1440", "#1A2060"] as [string, string],
+      title: `${streak}-Day Streak!`,
+      body: "Keep it up! Daily tracking builds better money habits over time.",
+    });
+  }
+
+  if (balance < 0) {
+    insights.push({
+      icon: "⚠️",
+      color: "#EF5350",
+      gradient: ["#1A0000", "#3E0000"] as [string, string],
+      title: "Negative Balance Alert",
+      body: "Your balance is below zero. Review your expenses and consider reducing non-essential spending immediately.",
+    });
+  } else if (balance < 5000) {
+    insights.push({
+      icon: "🔔",
+      color: "#FFA726",
+      gradient: ["#1A0E00", "#3E2200"] as [string, string],
+      title: "Low Balance Warning",
+      body: `Only Rs. ${balance.toLocaleString("en-NP")} remaining. Avoid unnecessary purchases until income arrives.`,
+    });
+  }
+
+  if (income === 0 && expenses > 0) {
+    insights.push({
+      icon: "📥",
+      color: "#66BB6A",
+      gradient: ["#001A06", "#003D0E"] as [string, string],
+      title: "Add Income Records",
+      body: "You have expenses logged but no income this month. Add your salary or income sources for accurate insights.",
+    });
+  }
+
+  if (transactions.length === 0) {
+    insights.push({
+      icon: "🚀",
+      color: COLORS.primaryLight,
+      gradient: ["#0D1B4B", "#1565C0"] as [string, string],
+      title: "Welcome to CashBuddy Nepal Pro!",
+      body: "Start by adding your first transaction. Track daily expenses to unlock powerful AI-powered insights.",
+    });
+  }
+
+  return insights.length ? insights : [{
+    icon: "✅",
+    color: "#66BB6A",
+    gradient: ["#001A06", "#003D0E"] as [string, string],
+    title: "All Good!",
+    body: "Your finances look balanced. Keep tracking daily to maintain your financial health.",
+  }];
 }
 
 export default function HomeScreen() {
@@ -47,7 +176,8 @@ export default function HomeScreen() {
   const income = getMonthlyIncome();
   const expenses = getMonthlyExpenses();
   const savings = income - expenses;
-  const savingsRate = income > 0 ? ((savings / income) * 100).toFixed(0) : "0";
+  const savingsRate = income > 0 ? (savings / income) * 100 : 0;
+  const savingsRateStr = savingsRate.toFixed(0);
   const recentTx = transactions.slice(0, 5);
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 16;
 
@@ -56,19 +186,30 @@ export default function HomeScreen() {
     setTimeout(() => setRefreshing(false), 800);
   };
 
-  const alertBudgets = budgets.filter(
-    (b) => b.spent / b.limit >= 0.8 && b.limit > 0
-  );
+  const alertBudgets = budgets.filter((b) => b.spent / b.limit >= 0.8 && b.limit > 0);
   const nearGoal = goals.find(
-    (g) =>
-      g.currentAmount / g.targetAmount >= 0.9 &&
-      g.currentAmount < g.targetAmount
+    (g) => g.currentAmount / g.targetAmount >= 0.9 && g.currentAmount < g.targetAmount
   );
 
   const categorySpending = getCategorySpending();
-  const topCategory = Object.entries(categorySpending).sort(
-    ([, a], [, b]) => b - a
-  )[0];
+  const topCategory = Object.entries(categorySpending).sort(([, a], [, b]) => b - a)[0] as [string, number] | undefined;
+
+  const heatmapData = buildHeatmapData(transactions);
+  const maxHeatmap = Math.max(...heatmapData.map((d) => d.amount), 1);
+
+  const smartInsights = buildInsights({
+    balance,
+    income,
+    expenses,
+    savingsRate,
+    topCategory,
+    streak: profile.streak,
+    transactions,
+  });
+
+  const todayExpenses = transactions
+    .filter((t) => t.type === "expense" && t.date.slice(0, 10) === new Date().toISOString().slice(0, 10))
+    .reduce((s, t) => s + t.amount, 0);
 
   return (
     <GradientBackground colors={["#060D1F", "#0A1628", "#0D1B4B"]}>
@@ -91,7 +232,7 @@ export default function HomeScreen() {
         >
           <View>
             <Text style={styles.greeting}>{getGreeting()},</Text>
-            <Text style={styles.userName}>{profile.name.split(" ")[0]}</Text>
+            <Text style={styles.userName}>{profile.name.split(" ")[0] || "Friend"}</Text>
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -111,16 +252,20 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
-        {/* Level + streak */}
+        {/* Level + streak + today spend */}
         <Animated.View entering={FadeInDown.delay(80).duration(500)} style={styles.levelRow}>
           <View style={styles.levelBadge}>
             <Feather name="zap" size={12} color={COLORS.accent} />
-            <Text style={styles.levelText}>Level {profile.level} · {profile.xp} XP</Text>
+            <Text style={styles.levelText}>Lv.{profile.level} · {profile.xp} XP</Text>
           </View>
           <View style={styles.streakBadge}>
-            <Feather name="calendar" size={12} color={COLORS.success} />
-            <Text style={styles.streakText}>{profile.streak} day streak</Text>
+            <Text style={styles.streakText}>🔥 {profile.streak}d streak</Text>
           </View>
+          {todayExpenses > 0 && (
+            <View style={styles.todayBadge}>
+              <Text style={styles.todayText}>Today: {formatAmount(todayExpenses)}</Text>
+            </View>
+          )}
         </Animated.View>
 
         {/* Balance Card */}
@@ -129,14 +274,14 @@ export default function HomeScreen() {
         </Animated.View>
 
         {/* Monthly Insights Row */}
-        {income > 0 || expenses > 0 ? (
+        {(income > 0 || expenses > 0) && (
           <Animated.View entering={FadeInDown.delay(160).duration(500)} style={styles.insightRow}>
             <InsightCard
               icon="pie-chart"
-              label="Savings Rate"
-              value={`${savingsRate}%`}
-              color={parseFloat(savingsRate) >= 20 ? COLORS.success : COLORS.accentOrange}
-              sub={parseFloat(savingsRate) >= 20 ? "Healthy" : "Improve"}
+              label="Savings"
+              value={`${savingsRateStr}%`}
+              color={savingsRate >= 20 ? COLORS.success : COLORS.accentOrange}
+              sub={savingsRate >= 20 ? "Healthy ✓" : "Improve"}
             />
             <InsightCard
               icon="trending-down"
@@ -150,10 +295,10 @@ export default function HomeScreen() {
               label="Goals"
               value={`${goals.length}`}
               color={COLORS.accent}
-              sub={`${goals.filter(g => g.currentAmount >= g.targetAmount).length} done`}
+              sub={`${goals.filter((g) => g.currentAmount >= g.targetAmount).length} done`}
             />
           </Animated.View>
-        ) : null}
+        )}
 
         {/* Quick Actions */}
         <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.quickActions}>
@@ -164,9 +309,26 @@ export default function HomeScreen() {
           <QuickAction icon="shield" label="Budget" color={COLORS.accentOrange} onPress={() => router.push("/budget-setup")} />
         </Animated.View>
 
+        {/* Smart Insights Carousel */}
+        <Animated.View entering={FadeInDown.delay(230).duration(500)}>
+          <SmartInsightCard insights={smartInsights} />
+        </Animated.View>
+
+        {/* Budget Rings */}
+        {budgets.filter((b) => b.limit > 0).length > 0 && (
+          <Animated.View entering={FadeInDown.delay(260).duration(500)}>
+            <BudgetRingsRow budgets={budgets} />
+          </Animated.View>
+        )}
+
+        {/* Weekly Heatmap */}
+        <Animated.View entering={FadeInDown.delay(290).duration(500)}>
+          <WeeklyHeatmap data={heatmapData} maxAmount={maxHeatmap} />
+        </Animated.View>
+
         {/* Alerts */}
         {(alertBudgets.length > 0 || nearGoal) && (
-          <Animated.View entering={FadeInDown.delay(240).duration(500)} style={styles.section}>
+          <Animated.View entering={FadeInDown.delay(320).duration(500)} style={styles.section}>
             <Text style={styles.sectionTitle}>Alerts</Text>
             {alertBudgets.slice(0, 2).map((b) => (
               <View key={b.category} style={styles.alertCard}>
@@ -198,7 +360,7 @@ export default function HomeScreen() {
         )}
 
         {/* Recent Transactions */}
-        <Animated.View entering={FadeInDown.delay(280).duration(500)} style={styles.section}>
+        <Animated.View entering={FadeInDown.delay(350).duration(500)} style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent</Text>
             <TouchableOpacity onPress={() => router.push("/(tabs)/analytics")}>
@@ -208,20 +370,14 @@ export default function HomeScreen() {
 
           {recentTx.length === 0 ? (
             <View style={styles.emptyBox}>
-              <LinearGradient
-                colors={["#0D47A1", "#1565C0"]}
-                style={styles.emptyIcon}
-              >
+              <LinearGradient colors={["#0D47A1", "#1565C0"]} style={styles.emptyIcon}>
                 <Feather name="plus-circle" size={28} color={COLORS.white} />
               </LinearGradient>
               <Text style={styles.emptyTitle}>No transactions yet</Text>
               <Text style={styles.emptySubtitle}>
                 Start tracking your income and expenses to see insights here.
               </Text>
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push("/add-transaction")}
-              >
+              <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push("/add-transaction")}>
                 <Text style={styles.emptyBtnText}>Add First Transaction</Text>
               </TouchableOpacity>
             </View>
@@ -231,12 +387,7 @@ export default function HomeScreen() {
                 <TransactionItem
                   key={t.id}
                   transaction={t}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/transaction-detail",
-                      params: { id: t.id },
-                    })
-                  }
+                  onPress={() => router.push({ pathname: "/transaction-detail", params: { id: t.id } })}
                 />
               ))}
             </View>
@@ -245,7 +396,7 @@ export default function HomeScreen() {
 
         {/* Financial Health Card */}
         {transactions.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(320).duration(500)} style={styles.section}>
+          <Animated.View entering={FadeInDown.delay(380).duration(500)} style={styles.section}>
             <Text style={styles.sectionTitle}>Financial Health</Text>
             <LinearGradient
               colors={["#0D1B4B", "#1565C0"]}
@@ -254,31 +405,12 @@ export default function HomeScreen() {
               end={{ x: 1, y: 1 }}
             >
               <View style={styles.healthRow}>
-                <HealthItem
-                  label="Balance"
-                  value={balance >= 0 ? "Good" : "Negative"}
-                  ok={balance >= 0}
-                />
-                <HealthItem
-                  label="Savings"
-                  value={parseFloat(savingsRate) >= 20 ? "Healthy" : "Low"}
-                  ok={parseFloat(savingsRate) >= 20}
-                />
-                <HealthItem
-                  label="Tracking"
-                  value={transactions.length >= 5 ? "Active" : "Start"}
-                  ok={transactions.length >= 5}
-                />
-                <HealthItem
-                  label="Goals"
-                  value={goals.length > 0 ? "Set" : "None"}
-                  ok={goals.length > 0}
-                />
+                <HealthItem label="Balance" value={balance >= 0 ? "Good" : "Negative"} ok={balance >= 0} />
+                <HealthItem label="Savings" value={savingsRate >= 20 ? "Healthy" : "Low"} ok={savingsRate >= 20} />
+                <HealthItem label="Tracking" value={transactions.length >= 5 ? "Active" : "Start"} ok={transactions.length >= 5} />
+                <HealthItem label="Goals" value={goals.length > 0 ? "Set" : "None"} ok={goals.length > 0} />
               </View>
-              <TouchableOpacity
-                style={styles.healthBtn}
-                onPress={() => router.push("/ai-chat")}
-              >
+              <TouchableOpacity style={styles.healthBtn} onPress={() => router.push("/ai-chat")}>
                 <Feather name="cpu" size={14} color={COLORS.white} />
                 <Text style={styles.healthBtnText}>Get AI Advice</Text>
               </TouchableOpacity>
@@ -301,18 +433,8 @@ export default function HomeScreen() {
   );
 }
 
-function InsightCard({
-  icon,
-  label,
-  value,
-  color,
-  sub,
-}: {
-  icon: string;
-  label: string;
-  value: string;
-  color: string;
-  sub: string;
+function InsightCard({ icon, label, value, color, sub }: {
+  icon: string; label: string; value: string; color: string; sub: string;
 }) {
   return (
     <View style={iStyles.card}>
@@ -337,14 +459,7 @@ const iStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.darkBorder,
   },
-  icon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 2,
-  },
+  icon: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 2 },
   value: { color: COLORS.white, fontSize: 14, fontFamily: "Inter_700Bold" },
   label: { color: COLORS.darkTextSecondary, fontSize: 10, fontFamily: "Inter_400Regular" },
   sub: { fontSize: 10, fontFamily: "Inter_600SemiBold" },
@@ -367,22 +482,17 @@ const hStyles = StyleSheet.create({
   label: { color: "rgba(255,255,255,0.5)", fontSize: 10, fontFamily: "Inter_400Regular" },
 });
 
-function QuickAction({
-  icon,
-  label,
-  color,
-  onPress,
-}: {
-  icon: string;
-  label: string;
-  color: string;
-  onPress: () => void;
+function QuickAction({ icon, label, color, onPress }: {
+  icon: string; label: string; color: string; onPress: () => void;
 }) {
   return (
     <TouchableOpacity style={styles.qaItem} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.qaIcon, { backgroundColor: color + "22" }]}>
+      <LinearGradient
+        colors={[color + "33", color + "11"]}
+        style={styles.qaIcon}
+      >
         <Feather name={icon as any} size={20} color={color} />
-      </View>
+      </LinearGradient>
       <Text style={styles.qaLabel}>{label}</Text>
     </TouchableOpacity>
   );
@@ -410,7 +520,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
   },
-  levelRow: { flexDirection: "row", paddingHorizontal: 20, gap: 10, marginBottom: 16 },
+  levelRow: { flexDirection: "row", paddingHorizontal: 20, gap: 8, marginBottom: 16, flexWrap: "wrap" },
   levelBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -424,9 +534,6 @@ const styles = StyleSheet.create({
   },
   levelText: { color: COLORS.accent, fontSize: 12, fontFamily: "Inter_600SemiBold" },
   streakBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
     backgroundColor: COLORS.success + "18",
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -435,8 +542,17 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success + "33",
   },
   streakText: { color: COLORS.success, fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  todayBadge: {
+    backgroundColor: COLORS.primaryLight + "18",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.primaryLight + "33",
+  },
+  todayText: { color: COLORS.primaryLight, fontSize: 12, fontFamily: "Inter_600SemiBold" },
   insightRow: { flexDirection: "row", paddingHorizontal: 16, gap: 10, marginBottom: 20 },
-  quickActions: { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 24, flexWrap: "nowrap" },
+  quickActions: { flexDirection: "row", paddingHorizontal: 16, gap: 8, marginBottom: 24 },
   qaItem: { flex: 1, alignItems: "center", gap: 8 },
   qaIcon: {
     width: 50,

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "1cd04965-4e6e-4085-a263-49112ef59b8b"
+      }
+    },
+    "android": {
+      "package": "com.expensetracker.hypersoft"
+    }
+  }
+}

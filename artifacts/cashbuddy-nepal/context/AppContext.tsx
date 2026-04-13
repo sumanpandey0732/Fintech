@@ -5,8 +5,10 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
+import { AppState, AppStateStatus, Platform } from "react-native";
 
 export type TransactionCategory =
   | "food"
@@ -84,11 +86,12 @@ export interface ChatMessage {
 }
 
 const STORAGE_KEYS = {
-  TRANSACTIONS: "cashbuddy_transactions",
-  BUDGETS: "cashbuddy_budgets",
-  GOALS: "cashbuddy_goals",
-  PROFILE: "cashbuddy_profile",
-  CHAT_HISTORY: "cashbuddy_chat",
+  TRANSACTIONS: "cashbuddy_transactions_v2",
+  BUDGETS: "cashbuddy_budgets_v2",
+  GOALS: "cashbuddy_goals_v2",
+  PROFILE: "cashbuddy_profile_v2",
+  CHAT_HISTORY: "cashbuddy_chat_v2",
+  LAST_SAVE: "cashbuddy_last_save",
 };
 
 const ACHIEVEMENTS_LIST: Achievement[] = [
@@ -214,9 +217,45 @@ interface AppContextType {
   getMonthlyExpenses: () => number;
   getCategorySpending: () => Record<string, number>;
   isLoading: boolean;
+  forceSave: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
+
+// Helper function to safely save to AsyncStorage with retry
+async function safeSave(key: string, data: unknown, retries = 3): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const jsonData = JSON.stringify(data);
+      await AsyncStorage.setItem(key, jsonData);
+      return true;
+    } catch (error) {
+      console.warn(`[CashBuddy] Save attempt ${i + 1} failed for ${key}:`, error);
+      if (i === retries - 1) {
+        console.error(`[CashBuddy] Failed to save ${key} after ${retries} attempts`);
+        return false;
+      }
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 100 * (i + 1)));
+    }
+  }
+  return false;
+}
+
+// Helper function to safely load from AsyncStorage
+async function safeLoad<T>(key: string, defaultValue: T): Promise<T> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed as T;
+    }
+    return defaultValue;
+  } catch (error) {
+    console.warn(`[CashBuddy] Failed to load ${key}:`, error);
+    return defaultValue;
+  }
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -225,49 +264,150 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Refs to track pending saves and current state
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const dataLoadedRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
 
+  // Save all data immediately
+  const saveAllData = useCallback(async () => {
+    if (!dataLoadedRef.current) return;
+    
+    try {
+      await Promise.all([
+        safeSave(STORAGE_KEYS.TRANSACTIONS, transactions),
+        safeSave(STORAGE_KEYS.BUDGETS, budgets),
+        safeSave(STORAGE_KEYS.GOALS, goals),
+        safeSave(STORAGE_KEYS.PROFILE, profile),
+        safeSave(STORAGE_KEYS.CHAT_HISTORY, chatHistory),
+        safeSave(STORAGE_KEYS.LAST_SAVE, new Date().toISOString()),
+      ]);
+    } catch (error) {
+      console.error("[CashBuddy] Error saving all data:", error);
+    }
+  }, [transactions, budgets, goals, profile, chatHistory]);
+
+  // Force save function exposed to context
+  const forceSave = useCallback(async () => {
+    await saveAllData();
+  }, [saveAllData]);
+
+  // Debounced save - saves after 500ms of no changes
+  const debouncedSave = useCallback(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      saveAllData();
+    }, 500);
+  }, [saveAllData]);
+
+  // Auto-save when data changes
+  useEffect(() => {
+    if (dataLoadedRef.current && profile.isOnboarded) {
+      debouncedSave();
+    }
+  }, [transactions, budgets, goals, profile, chatHistory, debouncedSave]);
+
+  // Save when app goes to background or is closed
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: AppStateStatus) => {
+      if (
+        appStateRef.current.match(/active/) &&
+        nextAppState.match(/inactive|background/)
+      ) {
+        // App is going to background - save immediately
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+        }
+        await saveAllData();
+      }
+      appStateRef.current = nextAppState;
+    };
+
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+      // Save when component unmounts
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      saveAllData();
+    };
+  }, [saveAllData]);
+
+  // Load all data on mount
   useEffect(() => {
     loadAllData();
   }, []);
 
   const loadAllData = async () => {
     try {
-      const profileRaw = await AsyncStorage.getItem(STORAGE_KEYS.PROFILE);
-      const savedProfile = profileRaw ? JSON.parse(profileRaw) : null;
-
-      // If not yet onboarded (new onboarding system), wipe ALL old data
-      // This removes any legacy demo/seeded data from previous sessions
-      if (!savedProfile || !savedProfile.isOnboarded) {
-        await AsyncStorage.multiRemove([
-          STORAGE_KEYS.TRANSACTIONS,
-          STORAGE_KEYS.BUDGETS,
-          STORAGE_KEYS.GOALS,
-          STORAGE_KEYS.CHAT_HISTORY,
-          STORAGE_KEYS.PROFILE,
+      // First check if user has completed onboarding
+      const savedProfile = await safeLoad<UserProfile | null>(STORAGE_KEYS.PROFILE, null);
+      
+      // Check for legacy data keys (v1) and migrate if needed
+      const legacyProfile = await safeLoad<UserProfile | null>("cashbuddy_profile", null);
+      
+      if (legacyProfile && legacyProfile.isOnboarded && !savedProfile) {
+        // Migrate from v1 to v2
+        const [legacyTx, legacyBudgets, legacyGoals, legacyChat] = await Promise.all([
+          safeLoad<Transaction[]>("cashbuddy_transactions", []),
+          safeLoad<Budget[]>("cashbuddy_budgets", []),
+          safeLoad<SavingGoal[]>("cashbuddy_goals", []),
+          safeLoad<ChatMessage[]>("cashbuddy_chat", []),
         ]);
+        
+        // Save to new keys
+        await Promise.all([
+          safeSave(STORAGE_KEYS.PROFILE, legacyProfile),
+          safeSave(STORAGE_KEYS.TRANSACTIONS, legacyTx),
+          safeSave(STORAGE_KEYS.BUDGETS, legacyBudgets),
+          safeSave(STORAGE_KEYS.GOALS, legacyGoals),
+          safeSave(STORAGE_KEYS.CHAT_HISTORY, legacyChat),
+        ]);
+        
+        setTransactions(legacyTx);
+        setBudgets(legacyBudgets);
+        setGoals(legacyGoals);
+        setChatHistory(legacyChat);
+        setProfile(legacyProfile);
+        dataLoadedRef.current = true;
+        setIsLoading(false);
+        return;
+      }
+
+      // If not yet onboarded, start fresh
+      if (!savedProfile || !savedProfile.isOnboarded) {
         setTransactions([]);
         setBudgets([]);
         setGoals([]);
         setChatHistory([]);
         setProfile(defaultProfile);
+        dataLoadedRef.current = true;
         setIsLoading(false);
         return;
       }
 
-      // User has completed onboarding — load their real data
-      const [txRaw, budgetRaw, goalRaw, chatRaw] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.TRANSACTIONS),
-        AsyncStorage.getItem(STORAGE_KEYS.BUDGETS),
-        AsyncStorage.getItem(STORAGE_KEYS.GOALS),
-        AsyncStorage.getItem(STORAGE_KEYS.CHAT_HISTORY),
+      // User has completed onboarding - load all data
+      const [txData, budgetData, goalData, chatData] = await Promise.all([
+        safeLoad<Transaction[]>(STORAGE_KEYS.TRANSACTIONS, []),
+        safeLoad<Budget[]>(STORAGE_KEYS.BUDGETS, []),
+        safeLoad<SavingGoal[]>(STORAGE_KEYS.GOALS, []),
+        safeLoad<ChatMessage[]>(STORAGE_KEYS.CHAT_HISTORY, []),
       ]);
 
-      if (txRaw) setTransactions(JSON.parse(txRaw));
-      if (budgetRaw) setBudgets(JSON.parse(budgetRaw));
-      if (goalRaw) setGoals(JSON.parse(goalRaw));
-      if (chatRaw) setChatHistory(JSON.parse(chatRaw));
+      setTransactions(txData);
+      setBudgets(budgetData);
+      setGoals(goalData);
+      setChatHistory(chatData);
       setProfile({ ...defaultProfile, ...savedProfile });
+      dataLoadedRef.current = true;
     } catch (e) {
+      console.error("[CashBuddy] Error loading data:", e);
+      dataLoadedRef.current = true;
     } finally {
       setIsLoading(false);
     }
@@ -278,17 +418,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const newXp = prev.xp + amount;
       const xpNeeded = getXpForNextLevel(prev.level);
       if (newXp >= xpNeeded) {
-        const updated = {
+        return {
           ...prev,
           xp: newXp - xpNeeded,
           level: prev.level + 1,
         };
-        AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
-        return updated;
       }
-      const updated = { ...prev, xp: newXp };
-      AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
-      return updated;
+      return { ...prev, xp: newXp };
     });
   }, []);
 
@@ -297,22 +433,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setProfile((prev) => {
         if (prev.achievements.includes(id)) return prev;
         const achievement = ACHIEVEMENTS_LIST.find((a) => a.id === id);
-        const updated = {
+        if (achievement) {
+          addXP(achievement.xpReward);
+        }
+        return {
           ...prev,
           achievements: [...prev.achievements, id],
         };
-        AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
-        if (achievement) addXP(achievement.xpReward);
-        return updated;
       });
     },
     [addXP]
   );
 
   const completeOnboarding = useCallback(async (name: string, startingBalance: number) => {
-    const updated = { ...defaultProfile, name, startingBalance, isOnboarded: true };
+    const updated: UserProfile = { 
+      ...defaultProfile, 
+      name, 
+      startingBalance, 
+      isOnboarded: true,
+      lastActiveDate: new Date().toISOString(),
+    };
     setProfile(updated);
-    await AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
+    // Immediately save onboarding completion
+    await safeSave(STORAGE_KEYS.PROFILE, updated);
   }, []);
 
   const addTransaction = useCallback(
@@ -321,14 +464,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ...t,
         id: Crypto.randomUUID(),
       };
+      
       setTransactions((prev) => {
         const updated = [newTx, ...prev];
-        AsyncStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
+        // Immediately save transactions
+        safeSave(STORAGE_KEYS.TRANSACTIONS, updated);
         return updated;
       });
 
       await addXP(10);
 
+      // Check achievements
       setTransactions((prev) => {
         if (prev.length >= 10) unlockAchievement("transactions_10");
         if (prev.length === 1) unlockAchievement("first_transaction");
@@ -342,7 +488,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               ? { ...b, spent: b.spent + t.amount }
               : b
           );
-          AsyncStorage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(updated));
+          safeSave(STORAGE_KEYS.BUDGETS, updated);
           return updated;
         });
       }
@@ -353,7 +499,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const editTransaction = useCallback(async (id: string, t: Partial<Transaction>) => {
     setTransactions((prev) => {
       const updated = prev.map((tx) => (tx.id === id ? { ...tx, ...t } : tx));
-      AsyncStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.TRANSACTIONS, updated);
       return updated;
     });
   }, []);
@@ -361,7 +507,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteTransaction = useCallback(async (id: string) => {
     setTransactions((prev) => {
       const updated = prev.filter((tx) => tx.id !== id);
-      AsyncStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.TRANSACTIONS, updated);
       return updated;
     });
   }, []);
@@ -376,7 +522,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } else {
           updated = [...prev, b];
         }
-        AsyncStorage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(updated));
+        safeSave(STORAGE_KEYS.BUDGETS, updated);
         return updated;
       });
       await unlockAchievement("budget_setter");
@@ -387,7 +533,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteBudget = useCallback(async (category: TransactionCategory) => {
     setBudgets((prev) => {
       const updated = prev.filter((b) => b.category !== category);
-      AsyncStorage.setItem(STORAGE_KEYS.BUDGETS, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.BUDGETS, updated);
       return updated;
     });
   }, []);
@@ -397,7 +543,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const newGoal: SavingGoal = { ...g, id: Crypto.randomUUID() };
       setGoals((prev) => {
         const updated = [...prev, newGoal];
-        AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
+        safeSave(STORAGE_KEYS.GOALS, updated);
         return updated;
       });
       await unlockAchievement("goal_creator");
@@ -408,7 +554,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateGoal = useCallback(async (id: string, g: Partial<SavingGoal>) => {
     setGoals((prev) => {
       const updated = prev.map((gl) => (gl.id === id ? { ...gl, ...g } : gl));
-      AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.GOALS, updated);
       return updated;
     });
   }, []);
@@ -416,7 +562,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deleteGoal = useCallback(async (id: string) => {
     setGoals((prev) => {
       const updated = prev.filter((g) => g.id !== id);
-      AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.GOALS, updated);
       return updated;
     });
   }, []);
@@ -429,7 +575,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ? { ...g, currentAmount: Math.min(g.currentAmount + amount, g.targetAmount) }
             : g
         );
-        AsyncStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
+        safeSave(STORAGE_KEYS.GOALS, updated);
         return updated;
       });
       await addXP(20);
@@ -440,7 +586,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = useCallback(async (p: Partial<UserProfile>) => {
     setProfile((prev) => {
       const updated = { ...prev, ...p };
-      AsyncStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.PROFILE, updated);
       return updated;
     });
   }, []);
@@ -449,7 +595,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const newMsg: ChatMessage = { ...m, id: Crypto.randomUUID() };
     setChatHistory((prev) => {
       const updated = [...prev, newMsg];
-      AsyncStorage.setItem(STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(updated));
+      safeSave(STORAGE_KEYS.CHAT_HISTORY, updated);
       return updated;
     });
   }, []);
@@ -542,6 +688,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         getMonthlyExpenses,
         getCategorySpending,
         isLoading,
+        forceSave,
       }}
     >
       {children}
